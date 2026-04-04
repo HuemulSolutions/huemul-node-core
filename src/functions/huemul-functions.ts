@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { CloudProviderType } from "../types/huemul-types";
 import { globalEndDateISO, globalStartDateISO } from "../global";
+import { HuemulConfig } from "../config/huemul-config";
 export const huemulTimestamp = (((new Date).getUTCHours() * 60 * 60) +
                                 ((new Date).getUTCMinutes() * 60) +
                                 ((new Date).getUTCSeconds())).toString() +
@@ -32,7 +33,8 @@ export function createTokenId(tokenJWT: string, userId: string): string {
   return tokenId;
 }
 
-export function getQueryByName(cloudProvider: CloudProviderType, queryName: string, request: any): any {
+export function getQueryByName(queryName: string, request: any): any {
+  const cloudProvider = HuemulConfig.cloudProvider;
   let headerToReturn: any;
 
   if (typeof request.query[queryName] === "string" ) {
@@ -53,7 +55,8 @@ export function getQueryByName(cloudProvider: CloudProviderType, queryName: stri
   return headerToReturn
 }
 
-export function getHeaderByName(cloudProvider: CloudProviderType, headerName: string, request: any): any {
+export function getHeaderByName(headerName: string, request: any): any {
+  const cloudProvider = HuemulConfig.cloudProvider;
   let headerToReturn: any;
 
   if (typeof request.headers[headerName] === "string" ) {

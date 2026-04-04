@@ -1,3 +1,6 @@
+// Configuración global del framework
+export * from "./config/huemul-config";
+
 // Funciones utilitarias
 export * from "./functions/huemul-functions";
 

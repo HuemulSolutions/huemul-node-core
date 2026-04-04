@@ -8,6 +8,8 @@ import { defaultValueIfEmpty, castDateTimeToText, getHeaderByName, isEmpty, isNo
 import { errorMessages } from "./huemul-error-messages";
 import { IHuemulAppVersion } from "../interfaces/interface-huemul-appversion-v1";
 import { CloudProviderType } from "../types/huemul-types";
+import { HuemulConfig } from "../config/huemul-config";
+
 // import express = require("express");
 
 export interface IHuemulLog {
@@ -213,30 +215,7 @@ export function setGlobalCdcValuesBatch(huemulLog: HuemulLog<any>, data: Record<
   }
 }
 
-/**
- * HuemulLog
- */
-export interface IHuemulLogConfig {
-  appName: string;
-  cloudProvider: CloudProviderType;
-  appVersions: IHuemulAppVersion[];
-  logger: any;
-}
-
 export class HuemulLog<T> implements IHuemulLog {
-  // Static config — set once at app startup via HuemulLog.configure()
-  static appName: string = "";
-  static cloudProvider: CloudProviderType = CloudProviderType.azure;
-  static appVersions: IHuemulAppVersion[] = [];
-  static logger: any;
-
-  static configure(config: IHuemulLogConfig): void {
-    HuemulLog.appName = config.appName;
-    HuemulLog.cloudProvider = config.cloudProvider;
-    HuemulLog.appVersions = config.appVersions;
-    HuemulLog.logger = config.logger;
-  }
-
   whoIAm: IHuemulWhoIAm;
   whatIDid: IHuemulWhatIDid;
   executionConditions: IHuemulExecConditions;
@@ -264,7 +243,7 @@ export class HuemulLog<T> implements IHuemulLog {
     // this.currentTransactionId = this.newTransactionId()
 
     this.whoIAm = {
-      app: HuemulLog.appName,
+      app: HuemulConfig.appName,
       layer: layer,
       module: module,
       action: action,
@@ -334,7 +313,7 @@ export class HuemulLog<T> implements IHuemulLog {
    * @param {express.Request} request
    */
   setSenderInfo(request: any): void {
-    const xForw = getHeaderByName(HuemulLog.cloudProvider,"x-forwarded-for",request);
+    const xForw = getHeaderByName("x-forwarded-for",request);
     this.whoIAm.url = request.originalUrl;
     this.whoIAm.httpMethod = request.method;
     this.whoIAm.ip = (typeof xForw === "string" ? xForw : undefined) ||
@@ -355,22 +334,22 @@ export class HuemulLog<T> implements IHuemulLog {
     this.whoIAm.userGrants = request.locals?.userGrants;
     this.whoIAm.tokenDecoded = request.locals?.tokenDecoded;
 
-    this.whoIAm.humanLanguage = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-human-language-code",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-human-language-code",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-human-language-code",request) : "";
-    this.whoIAm.clientLanguage = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-client-language",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-client-language",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-client-language",request) : "";
-    this.whoIAm.clientVersion = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-client-version",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-client-version",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-client-version",request) : "";
-    this.whoIAm.clientApp = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-client-app",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-client-app",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-client-app",request) : "";
-    this.whoIAm.clientInfo = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-client-info",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-client-info",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-client-info",request) : "";
-    // this.whoIAm.platformInfo = getHeaderByName(HuemulLog.cloudProvider, "huemul-platform-info",request)
+    this.whoIAm.humanLanguage = isEmpty(getHeaderByName("huemul-human-language-code",request)) ?
+      "" : typeof getHeaderByName("huemul-human-language-code",request) == "string" ?
+      getHeaderByName("huemul-human-language-code",request) : "";
+    this.whoIAm.clientLanguage = isEmpty(getHeaderByName("huemul-client-language",request)) ?
+      "" : typeof getHeaderByName("huemul-client-language",request) == "string" ?
+      getHeaderByName("huemul-client-language",request) : "";
+    this.whoIAm.clientVersion = isEmpty(getHeaderByName("huemul-client-version",request)) ?
+      "" : typeof getHeaderByName("huemul-client-version",request) == "string" ?
+      getHeaderByName("huemul-client-version",request) : "";
+    this.whoIAm.clientApp = isEmpty(getHeaderByName("huemul-client-app",request)) ?
+      "" : typeof getHeaderByName("huemul-client-app",request) == "string" ?
+      getHeaderByName("huemul-client-app",request) : "";
+    this.whoIAm.clientInfo = isEmpty(getHeaderByName("huemul-client-info",request)) ?
+      "" : typeof getHeaderByName("huemul-client-info",request) == "string" ?
+      getHeaderByName("huemul-client-info",request) : "";
+    // this.whoIAm.platformInfo = getHeaderByName("huemul-platform-info",request)
 
     this.whatIDid.startDateIsAuth = request.locals?.authStartDate;
     this.whatIDid.endDateIsAuth = request.locals?.authEndDate;
@@ -389,7 +368,7 @@ export class HuemulLog<T> implements IHuemulLog {
    * @param {express.Request} request
    */
   setSenderInfoNotLogged(request: any) {
-    const orgIdFromHeader = getHeaderByName(HuemulLog.cloudProvider, "huemul-orgid",request);
+    const orgIdFromHeader = getHeaderByName("huemul-orgid",request);
     let orgId: string = typeof orgIdFromHeader === "string" ? orgIdFromHeader : "";
     if (isNotEmpty(orgId)) {
       orgId = orgId.toUpperCase();
@@ -401,23 +380,23 @@ export class HuemulLog<T> implements IHuemulLog {
     this.whoIAm.httpMethod = request.method;
     this.whoIAm.orgId = orgId;
     
-    this.whoIAm.humanLanguage = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-human-language-code",request)) ?
-    "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-human-language-code",request) == "string" ?
-    getHeaderByName(HuemulLog.cloudProvider, "huemul-human-language-code",request) : "en";
+    this.whoIAm.humanLanguage = isEmpty(getHeaderByName("huemul-human-language-code",request)) ?
+    "" : typeof getHeaderByName("huemul-human-language-code",request) == "string" ?
+    getHeaderByName("huemul-human-language-code",request) : "en";
     
-    this.whoIAm.clientLanguage = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-client-language",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-client-language",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-client-language",request) : "";
-    this.whoIAm.clientVersion = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-client-version",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-client-version",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-client-version",request) : "";
-    this.whoIAm.clientApp = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-client-app",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-client-app",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-client-app",request) : "";
-    this.whoIAm.clientInfo = isEmpty(getHeaderByName(HuemulLog.cloudProvider, "huemul-client-info",request)) ?
-      "" : typeof getHeaderByName(HuemulLog.cloudProvider, "huemul-client-info",request) == "string" ?
-      getHeaderByName(HuemulLog.cloudProvider, "huemul-client-info",request) : "";
-    // this.whoIAm.platformInfo = getHeaderByName(HuemulLog.cloudProvider, "huemul-platform-info",request)
+    this.whoIAm.clientLanguage = isEmpty(getHeaderByName("huemul-client-language",request)) ?
+      "" : typeof getHeaderByName("huemul-client-language",request) == "string" ?
+      getHeaderByName("huemul-client-language",request) : "";
+    this.whoIAm.clientVersion = isEmpty(getHeaderByName("huemul-client-version",request)) ?
+      "" : typeof getHeaderByName("huemul-client-version",request) == "string" ?
+      getHeaderByName("huemul-client-version",request) : "";
+    this.whoIAm.clientApp = isEmpty(getHeaderByName("huemul-client-app",request)) ?
+      "" : typeof getHeaderByName("huemul-client-app",request) == "string" ?
+      getHeaderByName("huemul-client-app",request) : "";
+    this.whoIAm.clientInfo = isEmpty(getHeaderByName("huemul-client-info",request)) ?
+      "" : typeof getHeaderByName("huemul-client-info",request) == "string" ?
+      getHeaderByName("huemul-client-info",request) : "";
+    // this.whoIAm.platformInfo = getHeaderByName("huemul-platform-info",request)
 
     this.whatIDid.startDateIsAuth = request.locals?.authStartDate;
     this.whatIDid.endDateIsAuth = request.locals?.authEndDate;
@@ -609,7 +588,7 @@ export class HuemulLog<T> implements IHuemulLog {
     const myResponse = this.createHuemulResponse(data, statusCode);
     this.registerToLog(false);
     if (response) {
-      if (HuemulLog.cloudProvider === CloudProviderType.azureFunctions) {
+      if (HuemulConfig.cloudProvider === CloudProviderType.azureFunctions) {
         response.setHeader('Content-Type', 'application/json; charset=utf-8');
       } else {
         response.set('Content-Type', 'application/json; charset=utf-8');
@@ -638,7 +617,7 @@ export class HuemulLog<T> implements IHuemulLog {
     //const myResponse = this.createHuemulResponse(data, statusCode);
     this.registerToLog(false);
     if (response) {
-      if (HuemulLog.cloudProvider === CloudProviderType.azureFunctions) {
+      if (HuemulConfig.cloudProvider === CloudProviderType.azureFunctions) {
         response.setHeader('Content-Type', 'text/html; charset=utf-8');
       } else {
         response.set('Content-Type', 'text/html; charset=utf-8');
@@ -670,7 +649,7 @@ export class HuemulLog<T> implements IHuemulLog {
     const fileContent = fs.readFileSync(fileNameWithPath, 'utf-8');
 
     if (response) {
-      if (HuemulLog.cloudProvider === CloudProviderType.azureFunctions) {
+      if (HuemulConfig.cloudProvider === CloudProviderType.azureFunctions) {
         response.setHeader('Content-disposition', `attachment; filename=${fileName}`);
         response.setHeader('Content-type', 'text/plain');
       } else {
@@ -731,7 +710,7 @@ export class HuemulLog<T> implements IHuemulLog {
     const myResponse = this.createHuemulError2(errorId, this.getTextFromExternalError(errorTxt), statusCode);
     this.registerToLog(true);
     if (response) {
-      if (HuemulLog.cloudProvider === CloudProviderType.azureFunctions) {
+      if (HuemulConfig.cloudProvider === CloudProviderType.azureFunctions) {
         response.setHeader('Content-Type', 'application/json; charset=utf-8');
       } else {
         response.set('Content-Type', 'application/json; charset=utf-8');
@@ -856,7 +835,7 @@ export class HuemulLog<T> implements IHuemulLog {
         transactionId: this.whoIAm.transactionId,
 
         extraInfo: [{}],
-        appVersions: HuemulLog.appVersions
+        appVersions: HuemulConfig.appVersions
       };
 
       // this.consoleError(`errorId: ${errorId}, errorTxt: ${errorTxt}`, error)
@@ -877,7 +856,7 @@ export class HuemulLog<T> implements IHuemulLog {
         transactionId: this.whoIAm.transactionId,
 
         extraInfo: [{}],
-        appVersions: HuemulLog.appVersions
+        appVersions: HuemulConfig.appVersions
       };
     }
   }
@@ -911,7 +890,7 @@ export class HuemulLog<T> implements IHuemulLog {
         transactionId: this.whoIAm.transactionId,
 
         extraInfo: [{}],
-        appVersions: HuemulLog.appVersions
+        appVersions: HuemulConfig.appVersions
       };
 
       return response;
@@ -928,7 +907,7 @@ export class HuemulLog<T> implements IHuemulLog {
         transactionId: this.whoIAm.transactionId,
 
         extraInfo: [{}],
-        appVersions: HuemulLog.appVersions
+        appVersions: HuemulConfig.appVersions
       };
     }
   }
@@ -961,7 +940,7 @@ export class HuemulLog<T> implements IHuemulLog {
       return this._loggerInternalHuemul;
     }
 
-    this._loggerInternalHuemul = HuemulLog.logger;
+    this._loggerInternalHuemul = HuemulConfig.logger;
 
     return this._loggerInternalHuemul;
   }
@@ -1099,7 +1078,7 @@ export class HuemulLog<T> implements IHuemulLog {
     if (this.logger() !== undefined) {
       try {
         if (errorRaised) {
-          this.logger().error(`${HuemulLog.appName} id[${data.transactionId}] - HuemulLog - ${data.app}.${data.layer}.${data.module}.${data.functionName} (${data.action}) `, {
+          this.logger().error(`${HuemulConfig.appName} id[${data.transactionId}] - HuemulLog - ${data.app}.${data.layer}.${data.module}.${data.functionName} (${data.action}) `, {
             huemulObject: data,
 
             labels: {
@@ -1114,7 +1093,7 @@ export class HuemulLog<T> implements IHuemulLog {
               type: "HuemulLog",
             }});
         } else {
-          this.logger().info(`${HuemulLog.appName} id[${data.transactionId}] - HuemulLog - ${data.app}.${data.layer}.${data.module}.${data.functionName} (${data.action}) `, {
+          this.logger().info(`${HuemulConfig.appName} id[${data.transactionId}] - HuemulLog - ${data.app}.${data.layer}.${data.module}.${data.functionName} (${data.action}) `, {
             huemulObject: data,
 
             labels: {
