@@ -1,4 +1,4 @@
-# @HuemulSolutions/huemul-node-core
+# @huemulsolutions/huemul-node-core
 
 Core framework compartido entre todos los proyectos Node.js de HuemulSolutions. Incluye logging estructurado, filtros, funciones utilitarias, helpers de PostgreSQL e interfaces base.
 
@@ -8,11 +8,12 @@ Core framework compartido entre todos los proyectos Node.js de HuemulSolutions. 
 
 | Módulo | Descripción |
 |---|---|
+| `HuemulConfig` | Configuración global del framework (inicializar una vez al arrancar) |
 | `HuemulLog` | Logging estructurado con soporte para Azure y Google Cloud |
 | `errorMessages` | Mensajes de error i18n (es / en) |
-| `HuemulFilters` | Clase de filtros para consultas |
-| `huemul-functions` | Funciones utilitarias (hash, fechas, headers, etc.) |
-| `gen-postgres-base` | Helpers base para PostgreSQL |
+| `HuemulFilters` | Generación de cláusulas WHERE tipadas para SQL |
+| `huemul-functions` | Funciones utilitarias (hash, cifrado, fechas, base64, etc.) |
+| `dataTypeToPostgres` | Mapeo de tipos del framework a tipos PostgreSQL |
 | `CloudProviderType`, `DatabaseType`, etc. | Enums del framework |
 | Interfaces `IHuemulBaseData`, `IHuemulFilter`, etc. | Contratos base de datos y filtros |
 
@@ -23,14 +24,14 @@ Core framework compartido entre todos los proyectos Node.js de HuemulSolutions. 
 Agrega el archivo `.npmrc` en la raíz de tu proyecto apuntando al registry de GitHub Packages:
 
 ```
-@HuemulSolutions:registry=https://npm.pkg.github.com
+@huemulsolutions:registry=https://npm.pkg.github.com
 //npm.pkg.github.com/:_authToken=YOUR_GITHUB_TOKEN
 ```
 
 Luego instala el paquete:
 
 ```bash
-npm install @HuemulSolutions/huemul-node-core
+npm install @huemulsolutions/huemul-node-core
 ```
 
 ---
@@ -39,14 +40,14 @@ npm install @HuemulSolutions/huemul-node-core
 
 ### 1. Configuración inicial (una vez al arrancar la app)
 
-Llama a `HuemulLog.configure()` al inicio de tu aplicación (antes de cualquier uso de `HuemulLog`):
+Llama a `HuemulConfig.configure()` al inicio de tu aplicación, antes de cualquier otro uso del framework:
 
 ```typescript
-import { HuemulLog, CloudProviderType } from "@HuemulSolutions/huemul-node-core";
+import { HuemulConfig, CloudProviderType } from "@huemulsolutions/huemul-node-core";
 
-HuemulLog.configure({
+HuemulConfig.configure({
   appName: process.env.APP_NAME ?? "mi-app",
-  cloudProvider: process.env.CLOUD_PROVIDER ?? CloudProviderType.google,
+  cloudProvider: process.env.CLOUD_PROVIDER as CloudProviderType ?? CloudProviderType.google,
   appVersions: [
     {
       appName: "mi-app",
@@ -54,19 +55,19 @@ HuemulLog.configure({
       appVersion: process.env.APP_WEB_VERSION ?? "0.0.0",
     },
   ],
+  logger: undefined, // pasa aquí tu logger (Winston, Bunyan, Google Cloud Logging, etc.)
 });
 ```
 
-Una vez configurado, `HuemulLog.appName`, `HuemulLog.cloudProvider` y `HuemulLog.appVersions` están disponibles en cualquier parte del código.
+Una vez configurado, todas las clases del framework (`HuemulLog`, `getHeaderByName`, etc.) leen automáticamente desde `HuemulConfig`.
 
 ---
 
 ### 2. Logging
 
 ```typescript
-import { HuemulLog, layerType, errorType } from "@HuemulSolutions/huemul-node-core";
+import { HuemulLog, layerType, errorType } from "@huemulsolutions/huemul-node-core";
 
-// Definir los módulos de tu app como enum string
 enum moduleType {
   users = "users",
   products = "products",
@@ -75,7 +76,7 @@ enum moduleType {
 // Crear una instancia por operación
 const log = new HuemulLog(layerType.logic, moduleType.users, "getById", "userLogicGetById", "1.0");
 
-// Registrar pasos
+// Registrar pasos intermedios
 log.setStepName("query-db");
 
 // Finalizar con éxito
@@ -90,9 +91,9 @@ return log.finishErrorForDataLayer(errorType.dbRecordNotFound, "Usuario no encon
 ### 3. Mensajes de error i18n
 
 ```typescript
-import { errorMessages } from "@HuemulSolutions/huemul-node-core";
+import { errorMessages } from "@huemulsolutions/huemul-node-core";
 
-const lang = whoIAm.humanLanguage; // "es" o "en"
+const lang = log.whoIAm.humanLanguage; // "es" o "en"
 
 errorMessages.errorDataDoesntExist(lang, "users", userId);
 // es: "El registro no existe"
@@ -113,55 +114,77 @@ import {
   DatabaseType,
   HuemulEnvironmentType,
   UserManagerType,
-} from "@HuemulSolutions/huemul-node-core";
+} from "@huemulsolutions/huemul-node-core";
 
-const provider = CloudProviderType.google;       // "google"
-const db       = DatabaseType.postgres;          // "postgres"
-const env      = HuemulEnvironmentType.PROD;     // "PROD"
+const provider = CloudProviderType.google;    // "google"
+const db       = DatabaseType.postgres;       // "postgres"
+const env      = HuemulEnvironmentType.PROD;  // "PROD"
 ```
 
 ---
 
-### 5. Filtros
+### 5. Filtros SQL
 
 ```typescript
-import { HuemulFilters } from "@HuemulSolutions/huemul-node-core";
+import {
+  HuemulFilters,
+  HuemulFilterString,
+  HuemulFilterNumber,
+  HuemulFilterOperators,
+  HuemulColumnClass,
+} from "@huemulsolutions/huemul-node-core";
 
-const filters = new HuemulFilters();
-filters.addFilter("status", "=", "active");
+class UserFilters extends HuemulFilters {
+  name   = new HuemulFilterString(HuemulColumnClass.NORMAL);
+  age    = new HuemulFilterNumber(HuemulColumnClass.NORMAL);
+  id     = new HuemulFilterNumber(HuemulColumnClass.PK);
+}
+
+const filters = new UserFilters();
+filters.name.addFilter("john", HuemulFilterOperators.LIKE);
+filters.age.addFilter(18, HuemulFilterOperators.GREATER_THAN_OR_EQUAL);
+
+const sql = filters.getWhereClause();
+// where (UPPER("base"."name") LIKE '%JOHN%') AND ("base"."age" >= 18)
 ```
 
 ---
 
 ## Publicación
 
-El paquete se publica automáticamente en **GitHub Packages** al hacer push de un tag con formato `v*`.
+El paquete se publica automáticamente en **GitHub Packages** al hacer push de un tag con formato `v*`. El workflow ejecuta los tests antes de publicar — si algún test falla, la publicación se cancela.
 
-### Pasos para publicar una nueva versión
+### Primera versión (sin tag previo)
 
-1. Actualiza la versión en `package.json`:
-   ```bash
-   npm version patch   # 1.0.0 → 1.0.1
-   npm version minor   # 1.0.0 → 1.1.0
-   npm version major   # 1.0.0 → 2.0.0
-   ```
+Si es la primera vez que publicas o el tag aún no existe en el repositorio remoto:
 
-2. Haz push del commit y el tag generado:
-   ```bash
-   git push origin main --tags
-   ```
+```bash
+git tag v1.0.1
+git push origin main --tags
+```
 
-3. El workflow `.github/workflows/publish.yml` ejecuta `npm publish` automáticamente.
+### Flujo normal para versiones siguientes
+
+```bash
+# 1. Commiteá tus cambios normalmente
+git add .
+git commit -m "feat: algo nuevo"
+
+# 2. Bump de versión (elige uno)
+npm version patch   # 1.0.1 → 1.0.2
+npm version minor   # 1.0.1 → 1.1.0
+npm version major   # 1.0.1 → 2.0.0
+
+# 3. Push del commit + tag en un solo comando
+git push origin main --tags
+```
+
+`npm version` actualiza `package.json`, crea el commit y el tag automáticamente. El push dispara el workflow.
 
 ### Publicación manual (opcional)
 
-Si necesitas publicar sin crear un tag:
-
 ```bash
-# Autenticarse con GitHub Packages
-npm login --registry=https://npm.pkg.github.com --scope=@HuemulSolutions
-
-# Compilar y publicar
+npm login --registry=https://npm.pkg.github.com --scope=@huemulsolutions
 npm run build
 npm publish
 ```
@@ -179,14 +202,23 @@ npm run build
 
 # Compilar en modo watch
 npm run watch
+
+# Ejecutar tests
+npm test
+
+# Tests en modo interactivo
+npm run test:watch
+
+# Reporte de cobertura
+npm run test:coverage
 ```
 
-Para probar el paquete localmente en otro proyecto antes de publicar, usa `npm link`:
+Para probar el paquete localmente en otro proyecto antes de publicar:
 
 ```bash
 # En este repositorio
 npm link
 
 # En el proyecto consumidor
-npm link @HuemulSolutions/huemul-node-core
+npm link @huemulsolutions/huemul-node-core
 ```

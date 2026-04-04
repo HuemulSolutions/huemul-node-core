@@ -23,3 +23,5 @@ export * from "./interfaces/interface-huemul-filter";
 export * from "./interfaces/interface-huemul-column-def";
 export * from "./interfaces/interface-huemul-appversion-v1";
 export * from "./interfaces/interface-huemul-trace-data-v1";
+
+export * from "./global";
