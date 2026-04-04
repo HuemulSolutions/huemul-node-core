@@ -1,6 +1,6 @@
 {
-  "name": "@HuemulSolutions/huemul-node-core",
-  "version": "1.0.0",
+  "name": "@huemulsolutions/huemul-node-core",
+  "version": "1.0.1",
   "description": "Huemul core framework: logging, filters, utilities",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +10,10 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "engines": {
     "node": ">=24"
@@ -23,6 +26,8 @@
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
-    "typescript": "^6.0.2"
+    "@vitest/coverage-v8": "^3.1.1",
+    "typescript": "^6.0.2",
+    "vitest": "^3.1.1"
   }
 }
