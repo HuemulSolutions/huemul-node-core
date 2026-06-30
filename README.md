@@ -14,6 +14,7 @@ Core framework compartido entre todos los proyectos Node.js de HuemulSolutions. 
 | `HuemulFilters` | Generación de cláusulas WHERE tipadas para SQL |
 | `huemul-functions` | Funciones utilitarias (hash, cifrado, fechas, base64, etc.) |
 | `dataTypeToPostgres` | Mapeo de tipos del framework a tipos PostgreSQL |
+| `huemul-swagger` | Generador OpenAPI 3.0 puro (schemas + paths CRUD + extras) desde `IHuemulColumnDef[]` |
 | `CloudProviderType`, `DatabaseType`, etc. | Enums del framework |
 | Interfaces `IHuemulBaseData`, `IHuemulFilter`, etc. | Contratos base de datos y filtros |
 
@@ -147,6 +148,56 @@ filters.age.addFilter(18, HuemulFilterOperators.GREATER_THAN_OR_EQUAL);
 const sql = filters.getWhereClause();
 // where (UPPER("base"."name") LIKE '%JOHN%') AND ("base"."age" >= 18)
 ```
+
+---
+
+### 6. Generador OpenAPI / Swagger
+
+Produce un documento **OpenAPI 3.0 en JSON plano** a partir de los `IHuemulColumnDef[]` que ya exporta cada módulo: schemas por módulo, los 6 paths CRUD estándar, endpoints custom (`extra`) y el envoltorio de respuesta `HuemulResponse`.
+
+> **Sin dependencias nuevas.** Core solo genera el JSON; servir la UI (`swagger-ui-express`) es responsabilidad de cada app consumidora.
+
+```typescript
+import {
+  buildHuemulOpenApiPaths,
+  huemulResponseComponents,
+  HuemulSwaggerModuleDef,
+} from "@huemulsolutions/huemul-node-core";
+
+// 1. Definí los módulos a exponer
+const defs: HuemulSwaggerModuleDef[] = [
+  { module: "gcCountry", prefix: "/gcCountry" },
+  {
+    module: "gcFile",
+    prefix: "/gcFile",
+    extra: [{ method: "post", path: "/upload/v1/", multipart: true }],
+  },
+];
+
+// 2. Loader que devuelve los ColumnsInfo de cada módulo
+const loader = (module: string) => columnsInfoByModule[module];
+
+// 3. Generá paths + schemas de los módulos y los componentes base
+const { paths, schemas } = buildHuemulOpenApiPaths(defs, loader, { basePath: "/api" });
+const core = huemulResponseComponents();
+
+// 4. Armá el documento OpenAPI final
+const swaggerSpec = {
+  openapi: "3.0.0",
+  info: { title: "Mi API", version: "1.0.0" },
+  servers: [{ url: "http://localhost:" + port }],
+  components: {
+    securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" } },
+    schemas: { ...core.schemas, ...schemas }, // ⚠️ merge: core primero, módulos después
+    responses: core.responses,
+  },
+  paths,
+};
+
+// La app sirve la UI con swagger-ui-express (core NO lo hace)
+```
+
+> **Importante:** los `schemas` de core (`HuemulResponse`) y los de los módulos deben **fusionarse** (`{ ...core.schemas, ...schemas }`), no sobrescribirse. Las `responses` reutilizables van bajo `components.responses`.
 
 ---
 

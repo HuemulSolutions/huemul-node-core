@@ -14,6 +14,9 @@ export * from "./logging/huemul-error-messages";
 // PostgreSQL helpers
 export * from "./gen-postgres-base";
 
+// Generador OpenAPI / Swagger
+export * from "./swagger/huemul-swagger";
+
 // Types y enums del framework
 export * from "./types/huemul-types";
 
