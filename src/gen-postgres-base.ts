@@ -23,6 +23,8 @@ export function dataTypeToPostgres(dataType: string, length?: number, precision?
     return `VECTOR(${length == 1024})`;
   } else if (dataType.toUpperCase() === "Time".toUpperCase()) {
     return "time";
+  } else if (dataType.toUpperCase() === "timestamptz".toUpperCase()) {
+    return "timestamptz";
   } else if (dataType.toUpperCase() === "number".toUpperCase() && (precision ?? 0) === 0) {
     return "INT";
   } else if (dataType.toUpperCase() === "number".toUpperCase()) {

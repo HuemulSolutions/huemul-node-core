@@ -55,6 +55,14 @@ describe('dataTypeToPostgres — Time', () => {
   })
 })
 
+describe('dataTypeToPostgres — timestamptz', () => {
+  it('returns "timestamptz" for a native timestamp-with-timezone column', () => {
+    expect(dataTypeToPostgres('timestamptz')).toBe('timestamptz')
+    expect(dataTypeToPostgres('TimestampTZ')).toBe('timestamptz')
+    expect(dataTypeToPostgres('TIMESTAMPTZ')).toBe('timestamptz')
+  })
+})
+
 describe('dataTypeToPostgres — number', () => {
   it('returns INT when no precision is given', () => {
     expect(dataTypeToPostgres('number')).toBe('INT')
