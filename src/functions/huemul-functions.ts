@@ -509,6 +509,25 @@ export function castDateTimeStringToDate(date: string, onlyDate: boolean = false
         ".000Z");
 }
 
+/**
+ * Trunca un valor de fecha (texto) al ancho de su columna `date`, usando el mismo criterio que
+ * `dataTypeToPostgres`: columnLength entre 1 y 39 -> ese largo; columnLength 0 o >= 40 -> 40.
+ * Así una columna solo-fecha (varchar(10)) recorta a `YYYY-MM-DD` y una fecha+hora (varchar(30))
+ * conserva la hora, evitando el overflow al insertar. No modifica valores no-string (null/undefined).
+ * @author Huemul Solutions
+ * @param {T} value valor entrante (texto de fecha) u otro tipo
+ * @param {number} columnLength longitud declarada de la columna date
+ * @return {T} el valor truncado (si es string) o el valor original
+ */
+export function truncateDateText<T>(value: T, columnLength?: number): T {
+  if (typeof value !== "string") {
+    return value;
+  }
+  const len = columnLength ?? 0;
+  const maxLength = (len <= 0 || len >= 40) ? 40 : len;
+  return value.substring(0, maxLength) as unknown as T;
+}
+
 
 
 /**

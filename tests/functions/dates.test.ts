@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   castDateTimeToText,
   castDateToText,
+  truncateDateText,
   castTimeToText,
   getDateTimeNumber,
   getDateFromText,
@@ -42,6 +43,31 @@ describe('castDateToText', () => {
   it('pads month and day with zeros', () => {
     expect(castDateToText(D('2024-01-05T00:00:00Z'), true))
       .toBe('2024-01-05')
+  })
+})
+
+describe('truncateDateText', () => {
+  it('truncates a full ISO datetime to 10 chars for a date-only column', () => {
+    expect(truncateDateText('2024-01-01T00:00:00.000Z', 10)).toBe('2024-01-01')
+  })
+  it('keeps the time for a datetime column (length 30)', () => {
+    expect(truncateDateText('2024-01-01T10:30:45.000Z', 30)).toBe('2024-01-01T10:30:45.000Z')
+  })
+  it('caps to 40 when columnLength is 0 (mirrors dataTypeToPostgres varchar(40))', () => {
+    const long = '2024-01-01T10:30:45.000000+00:00-extra-tail-chars'
+    expect(truncateDateText(long, 0)).toBe(long.substring(0, 40))
+  })
+  it('caps to 40 when columnLength >= 40', () => {
+    const long = '2024-01-01T10:30:45.000000+00:00-extra-tail-chars'
+    expect(truncateDateText(long, 50)).toBe(long.substring(0, 40))
+  })
+  it('does not touch values shorter than the limit', () => {
+    expect(truncateDateText('2024-01-01', 10)).toBe('2024-01-01')
+  })
+  it('returns non-string values unchanged', () => {
+    expect(truncateDateText(undefined, 10)).toBe(undefined)
+    expect(truncateDateText(null, 10)).toBe(null)
+    expect(truncateDateText(123 as unknown, 10)).toBe(123)
   })
 })
 
