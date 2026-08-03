@@ -16,6 +16,7 @@ export * from "./logging/huemul-error-messages";
 
 // PostgreSQL helpers
 export * from "./gen-postgres-base";
+export * from "./gen-postgres-schema";
 
 // Generador OpenAPI / Swagger
 export * from "./swagger/huemul-swagger";
