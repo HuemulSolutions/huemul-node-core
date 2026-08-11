@@ -238,8 +238,9 @@ export class HuemulFilters {
                         let convertToUpperCase = false; // Convert to uppercase for LIKE and EQUALS operators
                         if (this.isString(filterLine.value)) {
                             myValue = `${filterLine.value}`;
-                            if (myFilter.huemulColumnClass === HuemulColumnClass.NORMAL || filterLine.toUpper == true) {
-                                //convert to upper
+                            if (myFilter.huemulColumnClass === HuemulColumnClass.NORMAL || filterLine.toUpper == true
+                                || filterLine.operator === HuemulFilterOperators.LIKE) {
+                                //convert to upper (LIKE is always case-insensitive, even for PK/FK columns)
                                 myValue = myValue.toUpperCase();
                                 convertToUpperCase = true;
                             }

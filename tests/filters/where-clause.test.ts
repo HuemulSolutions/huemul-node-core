@@ -96,6 +96,47 @@ describe('HuemulFilters.getWhereClause — operators', () => {
   })
 })
 
+describe('HuemulFilters.getWhereClause — LIKE on PK/FK columns', () => {
+  class KeyFilters extends HuemulFilters {
+    docId    = new HuemulFilterString(HuemulColumnClass.PK)
+    parentId = new HuemulFilterString(HuemulColumnClass.FK)
+  }
+
+  let f: KeyFilters
+
+  beforeEach(() => { f = new KeyFilters() })
+
+  it('applies UPPER to a string PK column when operator is LIKE', () => {
+    f.docId.addFilter('abc123', HuemulFilterOperators.LIKE)
+    const sql = f.getWhereClause()
+    expect(sql).toMatch(/UPPER\((?:"base"\.)?"docId"\)/)
+    expect(sql).toContain("'%ABC123%'")
+  })
+
+  it('applies UPPER to a string FK column when operator is LIKE', () => {
+    f.parentId.addFilter('def456', HuemulFilterOperators.LIKE)
+    const sql = f.getWhereClause()
+    expect(sql).toMatch(/UPPER\((?:"base"\.)?"parentId"\)/)
+    expect(sql).toContain("'%DEF456%'")
+  })
+
+  it('keeps EQUALS on a string PK column case-sensitive (no UPPER)', () => {
+    f.docId.addFilter('abc123', HuemulFilterOperators.EQUALS)
+    const sql = f.getWhereClause()
+    expect(sql).not.toContain('UPPER')
+    expect(sql).toContain("'abc123'")
+  })
+
+  it('keeps IN on a string FK column case-sensitive (no UPPER)', () => {
+    f.parentId.addFilter('abc', HuemulFilterOperators.IN)
+    f.parentId.addFilter('def', HuemulFilterOperators.IN)
+    const sql = f.getWhereClause()
+    expect(sql).not.toContain('UPPER')
+    expect(sql).toContain("'abc'")
+    expect(sql).toContain("'def'")
+  })
+})
+
 describe('HuemulFilters.getWhereClause — IN / NOT IN', () => {
   let f: TestFilters
 
