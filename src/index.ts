@@ -6,6 +6,7 @@ export * from "./config/huemul-config";
 
 // Funciones utilitarias
 export * from "./functions/huemul-functions";
+export * from "./functions/huemul-version";
 
 // Filtros y clases de filtro
 export * from "./filters/huemul-filters";
@@ -17,6 +18,9 @@ export * from "./logging/huemul-error-messages";
 // PostgreSQL helpers
 export * from "./gen-postgres-base";
 export * from "./gen-postgres-schema";
+
+// Registro de módulos y actualización de esquema por package
+export * from "./schema/huemul-module-update";
 
 // Generador OpenAPI / Swagger
 export * from "./swagger/huemul-swagger";
