@@ -20,6 +20,7 @@ import {
   validateColumnType,
   validateColumn,
   validateModel,
+  isNarrowingChange,
 } from '../../src/gen-postgres-schema'
 import type { ISchemaColumn, SqlRunner } from '../../src/gen-postgres-schema'
 import type { IHuemulColumnDef } from '../../src/interfaces/interface-huemul-column-def'
@@ -100,6 +101,35 @@ describe('typesMatch', () => {
   it('matches on base for simple types, differs on base', () => {
     expect(typesMatch({ base: 'boolean' }, { base: 'boolean' })).toBe(true)
     expect(typesMatch({ base: 'text' }, { base: 'character varying', length: 100 })).toBe(false)
+  })
+})
+
+describe('isNarrowingChange', () => {
+  // firma: (expected = lo que dice el modelo, actual = lo que hay en la BD)
+  it('text -> varchar narrows: text is unbounded', () => {
+    expect(isNarrowingChange({ base: 'character varying', length: 100 }, { base: 'text' })).toBe(true)
+  })
+  it('varchar -> text widens', () => {
+    expect(isNarrowingChange({ base: 'text' }, { base: 'character varying', length: 100 })).toBe(false)
+  })
+  it('shorter varchar narrows, longer widens, equal does not', () => {
+    expect(isNarrowingChange({ base: 'character varying', length: 50 }, { base: 'character varying', length: 100 })).toBe(true)
+    expect(isNarrowingChange({ base: 'character varying', length: 200 }, { base: 'character varying', length: 100 })).toBe(false)
+    expect(isNarrowingChange({ base: 'character varying', length: 100 }, { base: 'character varying', length: 100 })).toBe(false)
+  })
+  it('treats an unbounded varchar in the DB as capacity that any length reduces', () => {
+    expect(isNarrowingChange({ base: 'character varying', length: 100 }, { base: 'character varying' })).toBe(true)
+    expect(isNarrowingChange({ base: 'character varying' }, { base: 'character varying', length: 100 })).toBe(false)
+  })
+  it('numeric narrows on lower precision or lower scale', () => {
+    expect(isNarrowingChange({ base: 'numeric', precision: 15, scale: 4 }, { base: 'numeric', precision: 19, scale: 4 })).toBe(true)
+    expect(isNarrowingChange({ base: 'numeric', precision: 19, scale: 2 }, { base: 'numeric', precision: 19, scale: 4 })).toBe(true)
+    expect(isNarrowingChange({ base: 'numeric', precision: 19, scale: 4 }, { base: 'numeric', precision: 15, scale: 2 })).toBe(false)
+  })
+  it('does not flag changes between different base types, such as json -> jsonb', () => {
+    expect(isNarrowingChange({ base: 'jsonb' }, { base: 'json' })).toBe(false)
+    expect(isNarrowingChange({ base: 'integer' }, { base: 'text' })).toBe(false)
+    expect(isNarrowingChange({ base: 'timestamp with time zone' }, { base: 'timestamp without time zone' })).toBe(false)
   })
 })
 
@@ -326,6 +356,69 @@ describe('syncTableSchema', () => {
     expect(executed).toContain('ALTER TABLE "subscription" ADD COLUMN "subsAmount" NUMERIC(19, 4) NOT NULL DEFAULT 0')
     expect(executed.some((s) => s.includes('ALTER COLUMN'))).toBe(false)
     expect(result.typeChanged[0]).toContain('skipped: applyTypeChanges=false')
+  })
+
+  // el caso del mundo real: la tabla física quedó en TEXT y el modelo declara varchar(100)
+  const narrowingModel: IHuemulColumnDef[] = [
+    col({ columnName: 'cdcCreateUser', columnType: 'string', columnLength: 100 }),
+  ]
+  const narrowingRows = [
+    { columnName: 'cdcCreateUser', dataType: 'text', characterMaximumLength: null, numericPrecision: null, numericScale: null, isNullable: 'YES' },
+  ]
+
+  it('narrowing: reports the change in its own bucket and generates no SQL by default', async () => {
+    const executed: string[] = []
+    const run: SqlRunner = async (sql) => {
+      executed.push(sql)
+      if (sql.includes('information_schema')) return narrowingRows
+      return []
+    }
+    const result = await syncTableSchema(run, narrowingModel, 'orgs', { applyChanges: true })
+    expect(result.narrowing).toHaveLength(1)
+    expect(result.narrowing[0]).toContain('cdcCreateUser (text -> varchar(100))')
+    expect(result.typeChanged).toHaveLength(0)
+    expect(result.sql).toHaveLength(0)
+    expect(executed.some((s) => s.includes('ALTER COLUMN'))).toBe(false)
+    expect(result.errors).toHaveLength(0)
+  })
+
+  it('narrowing: applyTypeChanges=true is NOT enough to apply it', async () => {
+    const executed: string[] = []
+    const run: SqlRunner = async (sql) => {
+      executed.push(sql)
+      if (sql.includes('information_schema')) return narrowingRows
+      return []
+    }
+    const result = await syncTableSchema(run, narrowingModel, 'orgs', { applyChanges: true, applyTypeChanges: true })
+    expect(result.narrowing).toHaveLength(1)
+    expect(executed.some((s) => s.includes('ALTER COLUMN'))).toBe(false)
+  })
+
+  it('narrowing: still reported when applyTypeChanges=false, and never as typeChanged', async () => {
+    const run: SqlRunner = async (sql) => (sql.includes('information_schema') ? narrowingRows : [])
+    const result = await syncTableSchema(run, narrowingModel, 'orgs', { applyChanges: false, applyTypeChanges: false })
+    expect(result.narrowing).toHaveLength(1)
+    expect(result.typeChanged).toHaveLength(0)
+  })
+
+  it('narrowing: applyNarrowingChanges=true executes the ALTER, accepting truncation', async () => {
+    const executed: string[] = []
+    const run: SqlRunner = async (sql) => {
+      executed.push(sql)
+      if (sql.includes('information_schema')) return narrowingRows
+      return []
+    }
+    const result = await syncTableSchema(run, narrowingModel, 'orgs', { applyChanges: true, applyNarrowingChanges: true })
+    expect(result.narrowing).toHaveLength(0)
+    expect(result.typeChanged).toEqual(['cdcCreateUser (text -> varchar(100))'])
+    expect(executed).toContain('ALTER TABLE "orgs" ALTER COLUMN "cdcCreateUser" TYPE varchar(100) USING "cdcCreateUser"::varchar(100)')
+  })
+
+  it('narrowing: a widening change is unaffected by the guard', async () => {
+    const run: SqlRunner = async (sql) => (sql.includes('information_schema') ? actualRows : [])
+    const result = await syncTableSchema(run, model, 'subscription', { applyChanges: false })
+    expect(result.narrowing).toHaveLength(0)
+    expect(result.typeChanged).toEqual(['subsName (character varying(50) -> varchar(120))'])
   })
 
   it('creates the table when it does not exist (apply mode)', async () => {

@@ -2,10 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { dataTypeToPostgres } from '../../src/gen-postgres-base'
 
 describe('dataTypeToPostgres — string', () => {
-  // When no length is provided the fallback is 99999, which is > 8000, so TEXT is returned
-  it('returns TEXT for string with no explicit length', () => {
-    expect(dataTypeToPostgres('string')).toBe('TEXT')
-    expect(dataTypeToPostgres('string', undefined, undefined, true)).toBe('TEXT')
+  it('falls back to varchar(100), or varchar(50) for a PK, when no length is given', () => {
+    expect(dataTypeToPostgres('string')).toBe('varchar(100)')
+    expect(dataTypeToPostgres('string', undefined, undefined, true)).toBe('varchar(50)')
+  })
+
+  it('treats length 0 as "no length" instead of emitting the invalid varchar(0)', () => {
+    expect(dataTypeToPostgres('string', 0)).toBe('varchar(100)')
+    expect(dataTypeToPostgres('string', 0, undefined, true)).toBe('varchar(50)')
   })
 
   it('returns varchar(N) for string with explicit length ≤ 8000', () => {
@@ -13,9 +17,25 @@ describe('dataTypeToPostgres — string', () => {
     expect(dataTypeToPostgres('string', 8000)).toBe('varchar(8000)')
   })
 
+  it('ignores isPk when an explicit length is given', () => {
+    expect(dataTypeToPostgres('string', 255, undefined, true)).toBe('varchar(255)')
+  })
+
   it('returns TEXT for string with length > 8000', () => {
     expect(dataTypeToPostgres('string', 8001)).toBe('TEXT')
     expect(dataTypeToPostgres('string', 99999)).toBe('TEXT')
+  })
+})
+
+describe('dataTypeToPostgres — text', () => {
+  it('returns TEXT for an explicitly declared text column (case-insensitive)', () => {
+    expect(dataTypeToPostgres('text')).toBe('TEXT')
+    expect(dataTypeToPostgres('TEXT')).toBe('TEXT')
+    expect(dataTypeToPostgres('Text')).toBe('TEXT')
+  })
+
+  it('ignores length and isPk', () => {
+    expect(dataTypeToPostgres('text', 50, undefined, true)).toBe('TEXT')
   })
 })
 

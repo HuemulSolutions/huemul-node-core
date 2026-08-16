@@ -1,4 +1,5 @@
 /* eslint max-len: ["error", { "code": 400 }] */
+//version 1.0.3 2026-08-16 SRODRIGUEZ - bucket narrowing: los cambios que reducen capacidad no se aplican sin applyNarrowingChanges
 //version 1.0.2 2026-08-03 SRODRIGUEZ - escape de identificadores y literales + validación de identificadores y tipos
 //version 1.0.1 2026-08-03 SRODRIGUEZ - defaults por expresión SQL + validación de defaults
 //version 1.0.0 2026-07-16 SRODRIGUEZ - motor de sincronización de esquema (diff modelo vs BD real) + generación de ALTER/CREATE, puro (sin dependencia de knex/pg)
@@ -38,6 +39,8 @@ export interface IColumnDiff {
   expectedType?: string,
   actualType?: string,
   allowNull?: boolean,
+  /** true si el cambio reduce la capacidad de la columna y por lo tanto puede truncar datos (ver isNarrowingChange) */
+  isNarrowing?: boolean,
 }
 
 /**
@@ -61,6 +64,12 @@ export interface ITableSyncResult {
   tableMissing: boolean,
   added: string[],
   typeChanged: string[],
+  /**
+   * Cambios de tipo que REDUCEN la capacidad de la columna. Se reportan siempre y no se ejecutan
+   * salvo que se pida applyNarrowingChanges: true. Van en su propio bucket para que no se confundan
+   * con los cambios de tipo aplicables ni parezcan trabajo realizado.
+   */
+  narrowing: string[],
   extra: string[],
   errors: string[],
   sql: string[],
@@ -82,6 +91,12 @@ export interface ISyncModule {
 export interface ISchemaSyncOptions {
   applyChanges?: boolean,
   applyTypeChanges?: boolean,
+  /**
+   * false (default): los cambios que reducen la capacidad de una columna se reportan en `narrowing`
+   * y NO se ejecutan, ni siquiera con applyTypeChanges: true.
+   * true: se ejecutan, aceptando explícitamente que PostgreSQL truncará los datos que no quepan.
+   */
+  applyNarrowingChanges?: boolean,
 }
 
 /**
@@ -231,6 +246,41 @@ export function typesMatch(a: ICanonicalType, b: ICanonicalType): boolean {
   if (a.base === "character varying") return (a.length ?? null) === (b.length ?? null);
   if (a.base === "numeric") return (a.precision ?? null) === (b.precision ?? null) && (a.scale ?? 0) === (b.scale ?? 0);
   return true;
+}
+
+/**
+ * true si pasar de `actual` a `expected` REDUCE la capacidad de la columna, es decir, si el tipo
+ * destino puede almacenar estrictamente menos que el actual.
+ *
+ * Importa porque `buildAlterColumnTypeSql` emite un cast explícito (`USING c::varchar(n)`) y en
+ * PostgreSQL un cast explícito a varchar(n) TRUNCA en silencio en vez de fallar: una reducción
+ * aplicada por descuido destruye datos sin dejar rastro.
+ *
+ * @param {ICanonicalType} expected tipo derivado del modelo
+ * @param {ICanonicalType} actual tipo real en la base de datos
+ * @return {boolean}
+ */
+export function isNarrowingChange(expected: ICanonicalType, actual: ICanonicalType): boolean {
+  // text no tiene límite: pasar a varchar(n) acota lo que ya se puede guardar
+  if (actual.base === "text" && expected.base === "character varying") return true;
+
+  if (actual.base === "character varying" && expected.base === "character varying") {
+    // una longitud ausente en information_schema significa varchar sin límite (equivalente a text)
+    if (actual.length === undefined) return expected.length !== undefined;
+    if (expected.length === undefined) return false;
+    return expected.length < actual.length;
+  }
+
+  if (actual.base === "numeric" && expected.base === "numeric") {
+    const actualPrecision = actual.precision ?? 0;
+    const expectedPrecision = expected.precision ?? 0;
+    const actualScale = actual.scale ?? 0;
+    const expectedScale = expected.scale ?? 0;
+    // menos dígitos totales desborda; menos decimales redondea. Ambos pierden información
+    return expectedPrecision < actualPrecision || expectedScale < actualScale;
+  }
+
+  return false;
 }
 
 /**
@@ -599,6 +649,7 @@ export function diffTableColumns(columnsInfo: IHuemulColumnDef[], actualRows: IS
         expectedType: columnPostgresType(col),
         actualType: describeActual(actual),
         allowNull: col.allowNull,
+        isNarrowing: isNarrowingChange(expected, real),
       });
     }
   }
@@ -620,8 +671,9 @@ export function diffTableColumns(columnsInfo: IHuemulColumnDef[], actualRows: IS
 export async function syncTableSchema(run: SqlRunner, columnsInfo: IHuemulColumnDef[], tableName: string, opts?: ISchemaSyncOptions): Promise<ITableSyncResult> {
   const applyChanges = opts?.applyChanges ?? false;
   const applyTypeChanges = opts?.applyTypeChanges ?? true;
+  const applyNarrowingChanges = opts?.applyNarrowingChanges ?? false;
 
-  const result: ITableSyncResult = {tableName, tableMissing: false, added: [], typeChanged: [], extra: [], errors: [], sql: []};
+  const result: ITableSyncResult = {tableName, tableMissing: false, added: [], typeChanged: [], narrowing: [], extra: [], errors: [], sql: []};
 
   // el tableName se valida antes de la introspección, que es la primera sentencia que lo interpola
   const tableError = validateIdentifier(tableName, "tableName");
@@ -687,6 +739,13 @@ export async function syncTableSchema(run: SqlRunner, columnsInfo: IHuemulColumn
   }
 
   for (const change of diff.toAlter) {
+    // el chequeo de narrowing va ANTES que applyTypeChanges: una reducción de capacidad se reporta
+    // siempre en su propio bucket, se haya pedido o no aplicar cambios de tipo. Así `typeChanged`
+    // queda solo con las diferencias que sí se pueden aplicar sin perder datos.
+    if (change.isNarrowing === true && !applyNarrowingChanges) {
+      result.narrowing.push(`${change.columnName} (${change.actualType} -> ${change.expectedType}) [skipped: reduce capacidad, usar applyNarrowingChanges=true para aplicarlo aceptando truncamiento]`);
+      continue;
+    }
     if (!applyTypeChanges) {
       result.typeChanged.push(`${change.columnName} (${change.actualType} -> ${change.expectedType}) [skipped: applyTypeChanges=false]`);
       continue;
