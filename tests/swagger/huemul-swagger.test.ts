@@ -39,6 +39,16 @@ describe('huemulColumnToOpenApi', () => {
     expect(p).toMatchObject({ type: 'string', format: 'date-time' })
   })
 
+  it('timestamptz → string/date-time', () => {
+    const p = huemulColumnToOpenApi({ columnType: 'timestamptz' } as any)
+    expect(p).toMatchObject({ type: 'string', format: 'date-time' })
+  })
+
+  it('jsonb → object libre', () => {
+    const p = huemulColumnToOpenApi({ columnType: 'jsonb' } as any)
+    expect(p).toEqual({ type: 'object', additionalProperties: true })
+  })
+
   it('picker → prefijo [picker] en description', () => {
     const p = huemulColumnToOpenApi({ columnType: 'picker', columnDescription: 'estado' } as any)
     expect(p.type).toBe('string')

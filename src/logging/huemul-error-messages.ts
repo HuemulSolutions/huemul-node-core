@@ -127,6 +127,14 @@ export class errorMessages {
     return `Field ${fieldName} with value "${value}" is not a valid date`;
   }
 
+  static errorVersionFormat(humanLanguage: string, fieldName: string, value: unknown) {
+    if (humanLanguage === 'es') {
+      return `El campo ${fieldName} con valor "${value}" no es una versión válida (x.y.z)`;
+    }
+
+    return `Field ${fieldName} with value "${value}" is not a valid version (x.y.z)`;
+  }
+
   static errorValueNotFound(humanLanguage: string, fieldName: string, value: unknown) {
     if (humanLanguage === 'es') {
       return `El campo ${fieldName} con valor "${value}" no se encontró o está vacío`;

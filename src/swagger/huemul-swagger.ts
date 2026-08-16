@@ -52,7 +52,11 @@ export function huemulColumnToOpenApi(col: IHuemulColumnDef): OpenApiObj {
       prop = { type: "string", format: "date" };
       break;
     case "timestamp":
+    case "timestamptz":
       prop = { type: "string", format: "date-time" };
+      break;
+    case "jsonb":
+      prop = { type: "object", additionalProperties: true };
       break;
     case "string":
     case "picker":
