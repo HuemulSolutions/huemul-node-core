@@ -26,6 +26,18 @@ export interface IHuemulIndexDef {
 }
 
 /**
+ * Base de datos a la que pertenece la tabla de un módulo.
+ *
+ * Es el vocabulario que consume `createIn` y, en huemul-node-connections, el `target` de
+ * `<package>UpdateModules` (que le agrega 'both'). Se declara acá una sola vez para que ambos usos
+ * no puedan divergir.
+ *
+ * - 'adminDb': la base central; sus tablas se actualizan una vez por release.
+ * - 'orgDb': la base de cada organización; se actualizan dentro del bucle de organizaciones.
+ */
+export type HuemulModuleTarget = 'adminDb' | 'orgDb';
+
+/**
  * Entrada del registro de módulos: la tabla de un módulo, dónde vive y sus índices.
  * Cada package que posee tablas exporta un arreglo de estas entradas y una función que las
  * sincroniza; las aplicaciones dejan de declarar las tablas de sus dependencias.
@@ -39,7 +51,7 @@ export interface IHuemulModuleDef<TModuleId extends string = string> {
    * base de datos destino. Default (undefined) = 'orgDb': la base de cada organización.
    * 'adminDb': la base central/admin. Filtrar con `(e.createIn ?? 'orgDb')` para respetar el default.
    */
-  createIn?: 'adminDb' | 'orgDb',
+  createIn?: HuemulModuleTarget,
   /**
    * Hook de instalación RBAC (inserta el módulo y sus permisos). `updateModules` NO lo ejecuta:
    * el registro RBAC corre una vez por ambiente contra la base central, mientras el DDL corre por
@@ -66,17 +78,6 @@ export interface IUpdateModulesResult {
   sql: string[],
   /** errores acumulados de todos los módulos; updateModules no lanza */
   errors: string[],
-}
-
-/**
- * Opciones de updateModules. Son las de ISchemaSyncOptions, pero applyChanges tiene el default
- * INVERTIDO: updateModules es la función "ejecutar la actualización", así que por defecto aplica y
- * el dry-run es el opt-in (applyChanges: false). syncTableSchema/syncSchema conservan su default
- * seguro (false).
- * applyNarrowingChanges mantiene el default false en ambas: ninguna reducción de capacidad se
- * aplica sin pedirlo explícitamente.
- */
-export interface IUpdateModulesOptions extends ISchemaSyncOptions {
 }
 
 /**
@@ -194,13 +195,18 @@ export function buildCreateIndexSql(tableName: string, index: IHuemulIndexDef): 
  * es un ciclo de FK, que sortModulesByFkDependencies reporta como error de metadata y aquí se
  * captura hacia errors[].
  *
+ * Usa las mismas opciones que syncTableSchema, pero con `applyChanges` en default INVERTIDO: esta
+ * es la función "ejecutar la actualización", así que por defecto aplica y el dry-run es el opt-in
+ * (`applyChanges: false`); syncTableSchema/syncSchema conservan su default seguro. El default de
+ * `applyNarrowingChanges` es false en todas: ninguna reducción de capacidad se aplica sin pedirla.
+ *
  * @author Sebastián Rodríguez Robotham
  * @param {SqlRunner} run ejecutor de SQL contra la base destino
  * @param {IHuemulModuleDef[]} modules módulos a sincronizar (todos van a la MISMA base: filtrar por createIn antes de llamar)
- * @param {IUpdateModulesOptions} opts applyChanges default true; applyNarrowingChanges default false
+ * @param {ISchemaSyncOptions} opts applyChanges default true (ver arriba); applyNarrowingChanges default false
  * @return {Promise<IUpdateModulesResult>}
  */
-export async function updateModules(run: SqlRunner, modules: IHuemulModuleDef[], opts?: IUpdateModulesOptions): Promise<IUpdateModulesResult> {
+export async function updateModules(run: SqlRunner, modules: IHuemulModuleDef[], opts?: ISchemaSyncOptions): Promise<IUpdateModulesResult> {
   // default invertido respecto de syncTableSchema: esta es la función "ejecutar", el dry-run es el opt-in
   const applyChanges = opts?.applyChanges ?? true;
   const syncOptions: ISchemaSyncOptions = {
