@@ -9,7 +9,9 @@ Core framework compartido entre todos los proyectos Node.js de HuemulSolutions. 
 | Módulo | Descripción |
 |---|---|
 | `HuemulConfig` | Configuración global del framework (inicializar una vez al arrancar) |
+| `checkEnv` / `printEnvCheck` | Validación de variables de entorno al arranque, con catálogo base reutilizable |
 | `HuemulLog` | Logging estructurado con soporte para Azure y Google Cloud |
+| `consoleLogger` | Logger de consola legible, usado por defecto si la app no configura otro |
 | `errorMessages` | Mensajes de error i18n (es / en) |
 | `HuemulFilters` | Generación de cláusulas WHERE tipadas para SQL |
 | `huemul-functions` | Funciones utilitarias (hash, cifrado, fechas, base64, etc.) |
@@ -56,11 +58,80 @@ HuemulConfig.configure({
       appVersion: process.env.APP_WEB_VERSION ?? "0.0.0",
     },
   ],
-  logger: undefined, // pasa aquí tu logger (Winston, Bunyan, Google Cloud Logging, etc.)
+  // logger: opcional. Si lo omites se usa consoleLogger(), que imprime el motivo de cada error de
+  // forma legible. Pásalo solo si quieres otro destino (Google Cloud Logging, App Insights, etc.)
 });
 ```
 
 Una vez configurado, todas las clases del framework (`HuemulLog`, `getHeaderByName`, etc.) leen automáticamente desde `HuemulConfig`.
+
+---
+
+### 1.b Validación de variables de entorno
+
+Las apps leen su configuración con `process.env.X ?? ""`, así que una variable ausente o **vacía** es
+indistinguible de una bien configurada: el server arranca sin decir nada y falla mucho después con un
+error genérico (`SECRET_KEY_JWT` vacío, por ejemplo, hace que RBAC devuelva un 401 idéntico al de una
+contraseña mala).
+
+Llama a `printEnvCheck()` en `app.ts`, justo después de `dotenv.config()` y **antes** de importar los
+módulos que congelan las constantes de configuración:
+
+```typescript
+import dotenv from "dotenv";
+dotenv.config();
+
+import { buildEnvSpecs, huemulEnvSpecsBase, printEnvCheck, IHuemulEnvSpec } from "@huemulsolutions/huemul-node-core";
+
+// Variables propias de esta app
+const misSpecs: IHuemulEnvSpec[] = [
+  {name: "MI_API_TOKEN", severity: "critical", group: "Negocio", usedFor: "token de la API de XYZ"},
+];
+
+printEnvCheck(buildEnvSpecs(huemulEnvSpecsBase, misSpecs));
+
+import "./rbac-setup";   // a partir de aquí las constantes quedan congeladas
+```
+
+**Solo imprime warnings, nunca aborta**: un entorno a medio configurar igual levanta, para poder
+diagnosticarlo. Qué detecta:
+
+| Detección | Por qué importa |
+|---|---|
+| Variable ausente | Lo obvio |
+| Variable **definida pero vacía** o con solo espacios | `SECRET_KEY_JWT=` se comporta igual que no tenerla; un chequeo por `undefined` no la ve |
+| Valor fuera de `allowedValues` | `DATABASE_TYPE=mysql` o `ENVIROMENT=dev` se aceptan en silencio y fallan después |
+| Formato inválido (`validate`) | Un `ADMIN_SERVER_ADDRESS` sin puerto deja la conexión con `port: NaN` |
+
+**Severidades**: `critical` (sin esto el backend no funciona), `recommended` (hay default, pero operar
+sin ella casi siempre es un error de configuración), `optional` (solo si usas esa funcionalidad; se
+resumen en una línea para no enterrar a las que importan).
+
+**Catálogo base**. El package trae las specs de las variables que alimentan a los packages Huemul,
+agrupadas para poder tomarlas por partes:
+
+`huemulEnvSpecsDatabase`, `huemulEnvSpecsRbac`, `huemulEnvSpecsApp`, `huemulEnvSpecsEmail`,
+`huemulEnvSpecsStorage`, `huemulEnvSpecsKeyVault`, y `huemulEnvSpecsBase` con todas.
+
+Los nombres son la convención de los proyectos Huemul, no un contrato del package —los packages no
+leen `process.env`, reciben su configuración por inyección—, así que `buildEnvSpecs` permite ajustarlos:
+
+```typescript
+buildEnvSpecs(
+  huemulEnvSpecsBase,
+  [
+    // mismo nombre que una del base -> la reemplaza en su misma posición
+    {name: "URL_WEB", severity: "critical", group: "Entorno", usedFor: "obligatoria en esta app"},
+    // nombre nuevo -> se agrega al final
+    {name: "STORAGE_URL_BASE_GENERAL_INV", severity: "optional", group: "Storage", usedFor: "URL base del storage"},
+  ],
+  ["STORAGE_URL_BASE_GENERAL"],   // se quitan del base (aquí, por renombre)
+);
+```
+
+Para variables numéricas usa `numberFromEnv(process.env.X, 50)` y **no** `Number(process.env.X) ?? 50`:
+`Number(undefined)` devuelve `NaN`, que no es null ni undefined, así que el `??` nunca entrega el
+default y la constante queda en `NaN`.
 
 ---
 
@@ -86,6 +157,30 @@ return log.finishSuccessfullyForDataLayer([result]);
 // Finalizar con error
 return log.finishErrorForDataLayer(errorType.dbRecordNotFound, "Usuario no encontrado");
 ```
+
+#### Destino de los logs
+
+`HuemulConfig.logger` solo necesita exponer `.info() / .debug() / .warn() / .error()` con la forma
+`(message, meta)`. Si no configuras uno, se usa `consoleLogger()`:
+
+- el cierre exitoso de cada `HuemulLog` **no se imprime** —antes salía un `transactionId` suelto, que
+  no aporta y entierra lo que sí importa—;
+- ante un error se imprimen `stepName`, `errorTxt`, `orgId`, `url`… y sobre todo **`extraInfo`**, que
+  es donde el framework deja el mensaje crudo cuando al cliente se le responde uno genérico
+  (`finishErrorForDataLayer` con `dbOther` / `dbDataValidation`).
+
+Ese último punto es el que hace diagnosticable un error: cuando devuelvas un genérico al cliente
+(401/403/426), deja la causa concreta en `whatIDid.extraInfo` y el logger la imprime.
+
+```typescript
+huemulLog.whatIDid.extraInfo = {
+  unauthorizedReason: "falta el header 'authorization'",
+  ...huemulLog.whatIDid.extraInfo,
+};
+```
+
+Para silenciar la salida pasa un logger con los cuatro métodos vacíos; dejar `logger` en `undefined`
+no apaga nada, solo activa el de consola.
 
 ---
 

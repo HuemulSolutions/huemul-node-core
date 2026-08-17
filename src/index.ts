@@ -3,6 +3,7 @@ export * from "./cache/huemul-ttl-cache";
 
 // Configuración global del framework
 export * from "./config/huemul-config";
+export * from "./config/huemul-env-check";
 
 // Funciones utilitarias
 export * from "./functions/huemul-functions";
@@ -14,6 +15,7 @@ export * from "./filters/huemul-filters";
 // Logging estructurado
 export * from "./logging/huemul-log";
 export * from "./logging/huemul-error-messages";
+export * from "./logging/huemul-console-logger";
 
 // PostgreSQL helpers
 export * from "./gen-postgres-base";
