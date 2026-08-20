@@ -208,6 +208,18 @@ describe('validateDateTimeFormat', () => {
     expect(validateDateTimeFormat('not-a-date')).toBe(false)
     expect(validateDateTimeFormat('2024/01/15')).toBe(false)
   })
+  // La regex admite mes hasta 19 y día hasta 39, así que estos valores llegan al parseo y
+  // producen un Invalid Date. Antes reventaban con RangeError desde toISOString().
+  it('returns false (does not throw) for values that pass the regex but are not real dates', () => {
+    expect(() => validateDateTimeFormat('2026-19-39')).not.toThrow()
+    expect(validateDateTimeFormat('2026-19-39')).toBe(false)
+    expect(validateDateTimeFormat('2026-13-45')).toBe(false)
+  })
+  // Comportamiento conocido que NO cambia: JS desborda las fechas de calendario imposibles
+  // (2026-02-30 pasa a marzo), así que se siguen aceptando.
+  it('still accepts impossible calendar dates that JS overflows', () => {
+    expect(validateDateTimeFormat('2026-02-30')).toBe(true)
+  })
 })
 
 describe('validateDateTimeValue', () => {

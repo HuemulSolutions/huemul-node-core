@@ -531,6 +531,11 @@ export function truncateDateText<T>(value: T, columnLength?: number): T {
 
 
 /**
+ * Valida que el valor sea un string con formato ISO 8601 y una fecha parseable.
+ *
+ * Nota: la regex admite combinaciones que no son fechas reales (el mes acepta hasta 19 y el día
+ * hasta 39), así que la validez final la decide el parseo. Un valor como "2026-19-39" pasa la
+ * regex, produce un Invalid Date y devuelve false.
  *
  * @author Sebastián Rodríguez Robotham
  * @param {string} value
@@ -548,8 +553,12 @@ export function validateDateTimeFormat(value: string | unknown): boolean {
     return false; // No coincide con el patrón ISO 8601
   }
 
+  // Antes esto era `dateObj.toISOString() === value || !isNaN(dateObj.getTime())`, que con un
+  // Invalid Date lanzaba RangeError en toISOString() en vez de devolver false. La comparación
+  // era redundante: si la fecha es válida el segundo operando ya alcanza, y si no lo es el
+  // primero solo podía reventar. El resultado para toda entrada válida es idéntico.
   const dateObj = new Date(value);
-  return dateObj.toISOString() === value || !isNaN(dateObj.getTime());
+  return !Number.isNaN(dateObj.getTime());
 }
 
 /**

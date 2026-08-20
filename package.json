@@ -1,6 +1,6 @@
 {
   "name": "@huemulsolutions/huemul-node-core",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Huemul core framework: logging, filters, utilities",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
