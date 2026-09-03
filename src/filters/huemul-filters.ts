@@ -1,6 +1,6 @@
 import { hasValue, isEmpty, sqlInjectionValidation, toBoolean } from "../functions/huemul-functions";
 import { sanitizeSqlText } from "../global";
-import { HuemulColumnClass, HuemulFilterBase, HuemulFilterOperators, IHuemulFilterValues } from "../interfaces/interface-huemul-filter";
+import { HuemulColumnClass, HuemulFilterBase, HuemulFilterBoolean, HuemulFilterDate, HuemulFilterNumber, HuemulFilterOperators, HuemulReportingFieldType, HuemulReportingKind, IHuemulFilterValues, IHuemulReportingField } from "../interfaces/interface-huemul-filter";
 
 export enum SqlWhereConnector {
     INCLUDE_WHERE = "where",
@@ -91,6 +91,40 @@ export class HuemulFilters {
         }
 
         return undefined;
+    }
+
+    /**
+     * Get the reporting definition of every filter field: dimensions (default) and indicators.
+     * Fields not marked with asDimension()/asIndicator() are returned as dimensions.
+     * @returns IHuemulReportingField[] - one entry per filter field
+     */
+    getReportingFields(): IHuemulReportingField[] {
+        const fields: IHuemulReportingField[] = [];
+        for (const columnName of this.getMyColumnNames()) {
+            const filter = this.getPropertyByName(columnName);
+            if (filter === undefined) {
+                continue;
+            }
+            // instanceof y no getType(): HuemulFilterDate.getType() devuelve String y no distinguiría fecha de texto
+            let fieldType: HuemulReportingFieldType = 'string';
+            if (filter instanceof HuemulFilterDate) {
+                fieldType = 'date';
+            } else if (filter instanceof HuemulFilterNumber) {
+                fieldType = 'number';
+            } else if (filter instanceof HuemulFilterBoolean) {
+                fieldType = 'boolean';
+            }
+
+            fields.push({
+                name: columnName,
+                kind: filter.reportingKind ?? HuemulReportingKind.DIMENSION,
+                fieldType: fieldType,
+                allowedAggs: filter.allowedAggs,
+                defaultAgg: filter.defaultAgg,
+                sqlExpression: filter.sqlExpression,
+            });
+        }
+        return fields;
     }
 
     isString(value: any): boolean {

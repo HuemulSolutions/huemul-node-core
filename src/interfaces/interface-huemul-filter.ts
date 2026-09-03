@@ -16,7 +16,21 @@ export enum HuemulFilterOperators {
 export enum HuemulColumnClass {
     NORMAL = 'normal',
     PK = 'pk',
-    FK = 'fk',    
+    FK = 'fk',
+}
+
+export enum HuemulReportingAggType {
+    SUM = 'sum',
+    AVG = 'avg',
+    MIN = 'min',
+    MAX = 'max',
+    COUNT = 'count',
+    COUNT_DISTINCT = 'countDistinct',
+}
+
+export enum HuemulReportingKind {
+    DIMENSION = 'dimension',
+    INDICATOR = 'indicator',
 }
 
 export abstract class HuemulFilterBase<T> {
@@ -165,6 +179,48 @@ export abstract class HuemulFilterBase<T> {
 
     sortPosition?: number; // Optional property to define the sort position of the filter
     sortAscending?: boolean; // Optional property to define if the sorting is ascending or descending
+
+    reportingKind?: HuemulReportingKind; // reporting: dimension (group by) or indicator (aggregate). Undefined = dimension
+    allowedAggs?: HuemulReportingAggType[]; // reporting: aggregations allowed for this field (indicators only)
+    defaultAgg?: HuemulReportingAggType; // reporting: aggregation used when the client doesn't specify one
+    sqlExpression?: string; // reporting: server-side SQL expression to use instead of the plain column
+
+    /**
+     * Mark this field as a reporting dimension (group by column)
+     * @param sqlExpression optional server-side SQL expression to use instead of the plain column
+     * @return this (chainable)
+     */
+    asDimension(sqlExpression?: string): this {
+        this.reportingKind = HuemulReportingKind.DIMENSION;
+        this.sqlExpression = sqlExpression;
+        return this;
+    }
+
+    /**
+     * Mark this field as a reporting indicator (aggregated column)
+     * @param allowedAggs aggregations allowed for this field
+     * @param defaultAgg aggregation used when the client doesn't specify one (default: first of allowedAggs)
+     * @param sqlExpression optional server-side SQL expression to use instead of the plain column
+     * @return this (chainable)
+     */
+    asIndicator(allowedAggs: HuemulReportingAggType[], defaultAgg?: HuemulReportingAggType, sqlExpression?: string): this {
+        this.reportingKind = HuemulReportingKind.INDICATOR;
+        this.allowedAggs = allowedAggs;
+        this.defaultAgg = defaultAgg ?? allowedAggs[0];
+        this.sqlExpression = sqlExpression;
+        return this;
+    }
+}
+
+export type HuemulReportingFieldType = 'string' | 'number' | 'boolean' | 'date';
+
+export interface IHuemulReportingField {
+    name: string; // column name exposed by the module's getAll query
+    kind: HuemulReportingKind;
+    fieldType: HuemulReportingFieldType; // data type, defines which reporting transforms apply (datePart, substring, scale)
+    allowedAggs?: HuemulReportingAggType[]; // indicators only
+    defaultAgg?: HuemulReportingAggType; // indicators only
+    sqlExpression?: string;
 }
 
 export class HuemulFilterString extends HuemulFilterBase<string> {
