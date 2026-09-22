@@ -71,6 +71,8 @@ export interface ITableSyncResult {
    */
   narrowing: string[],
   extra: string[],
+  /** FK creadas o recreadas en esta corrida. Vacio si applyForeignKeys no esta activo. */
+  foreignKeys: string[],
   errors: string[],
   sql: string[],
 }
@@ -97,6 +99,13 @@ export interface ISchemaSyncOptions {
    * true: se ejecutan, aceptando explícitamente que PostgreSQL truncará los datos que no quepan.
    */
   applyNarrowingChanges?: boolean,
+  /**
+   * false (default): las FK no se reconcilian. Solo las tablas creadas de cero nacen con sus FK.
+   * true: se crean las FK declaradas que falten y se recrean las que existan con otra accion de
+   * borrado. Es opt-in porque crear una FK sobre datos que la violan falla, y una base con historia
+   * puede tener filas huerfanas que nadie ha mirado en anios.
+   */
+  applyForeignKeys?: boolean,
 }
 
 /**
@@ -529,7 +538,34 @@ export function validateColumn(col: IHuemulColumnDef): string[] {
     if (fkTable !== null) errors.push(fkTable);
     const fkColumn = validateIdentifier(col.PKModuleNameId ?? "", `${col.columnName}: PKModuleNameId`);
     if (fkColumn !== null) errors.push(fkColumn);
+    errors.push(...validateColumnFk(col));
+  } else if ((col.fkOnDelete ?? "").length > 0) {
+    errors.push(`${col.columnName}: declara fkOnDelete pero no es FK (falta PKModuleName)`);
   }
+  return errors;
+}
+
+/**
+ * Valida la accion de borrado declarada por una columna FK.
+ *
+ * `SET NULL` sobre una columna NOT NULL es el caso que importa: PostgreSQL deja declararlo y recien
+ * falla al borrar la fila referenciada, con la tabla ya en produccion.
+ *
+ * @param {IHuemulColumnDef} col
+ * @return {string[]}
+ */
+export function validateColumnFk(col: IHuemulColumnDef): string[] {
+  const declarada = (col.fkOnDelete ?? "").toString().trim();
+  if (declarada.length === 0) return [];
+
+  const errors: string[] = [];
+  if (!(FK_ON_DELETE_ACTIONS as readonly string[]).includes(declarada.toUpperCase())) {
+    errors.push(`${col.columnName}: fkOnDelete ${JSON.stringify(declarada)} no es una accion valida (${FK_ON_DELETE_ACTIONS.join(", ")})`);
+  }
+  if (declarada.toUpperCase() === "SET NULL" && col.allowNull !== true) {
+    errors.push(`${col.columnName}: fkOnDelete "SET NULL" exige allowNull: true, si no PostgreSQL falla al borrar la fila referenciada`);
+  }
+
   return errors;
 }
 
@@ -548,6 +584,88 @@ export function validateModel(columnsInfo: IHuemulColumnDef[], tableName: string
   return errors;
 }
 
+/** Acciones de ON DELETE que acepta el modelo. */
+export const FK_ON_DELETE_ACTIONS = ["CASCADE", "SET NULL", "RESTRICT", "NO ACTION"] as const;
+
+/**
+ * Accion de borrado declarada por la columna. Default CASCADE: es lo que hacian todas las FK antes
+ * de que existiera `fkOnDelete`, asi que ningun modelo existente cambia de comportamiento.
+ * @param {IHuemulColumnDef} col
+ * @return {string}
+ */
+export function fkOnDeleteAction(col: IHuemulColumnDef): string {
+  const declarada = (col.fkOnDelete ?? "").toString().trim().toUpperCase();
+  if (declarada.length === 0) return "CASCADE";
+
+  return (FK_ON_DELETE_ACTIONS as readonly string[]).includes(declarada) ? declarada : "CASCADE";
+}
+
+/**
+ * Nombre del constraint, igual al que PostgreSQL autogenera al declarar la FK inline en el CREATE.
+ * Usar el mismo nombre es lo que permite que la reconciliacion reconozca las FK ya existentes en
+ * vez de duplicarlas.
+ * @param {string} tableName
+ * @param {string} columnName
+ * @return {string}
+ */
+export function fkConstraintName(tableName: string, columnName: string): string {
+  return `${tableName}_${columnName}_fkey`;
+}
+
+/**
+ * FK declaradas en el modelo, con su accion de borrado.
+ * @param {IHuemulColumnDef[]} columnsInfo
+ * @param {string} tableName
+ * @return {Array} una entrada por columna con PKModuleName
+ */
+export function modelForeignKeys(columnsInfo: IHuemulColumnDef[], tableName: string): {constraintName: string, columnName: string, refTable: string, refColumn: string, onDelete: string}[] {
+  return columnsInfo
+      .filter((c) => (c.PKModuleName ?? "").length > 0)
+      .map((c) => ({
+        constraintName: fkConstraintName(tableName, c.columnName),
+        columnName: c.columnName,
+        refTable: c.PKModuleName ?? "",
+        refColumn: c.PKModuleNameId ?? "",
+        onDelete: fkOnDeleteAction(c),
+      }));
+}
+
+/**
+ * FK reales de una tabla, con la accion de borrado que tienen hoy en la base.
+ * @param {string} tableName
+ * @return {string} SQL
+ */
+export function informationSchemaForeignKeysSql(tableName: string): string {
+  return `SELECT tc.constraint_name AS "constraintName", kcu.column_name AS "columnName", ` +
+    `ccu.table_name AS "refTable", ccu.column_name AS "refColumn", rc.delete_rule AS "deleteRule" ` +
+    `FROM information_schema.table_constraints tc ` +
+    `JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema ` +
+    `JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema ` +
+    `JOIN information_schema.referential_constraints rc ON rc.constraint_name = tc.constraint_name AND rc.constraint_schema = tc.table_schema ` +
+    `WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = '${escapeSqlLiteral(tableName)}' AND tc.table_schema = 'public'`;
+}
+
+/**
+ * ALTER TABLE ... ADD CONSTRAINT de una FK declarada.
+ * @param {string} tableName
+ * @param {object} fk FK del modelo
+ * @return {string}
+ */
+export function buildAddForeignKeySql(tableName: string, fk: {constraintName: string, columnName: string, refTable: string, refColumn: string, onDelete: string}): string {
+  return `ALTER TABLE ${quoteIdent(tableName)} ADD CONSTRAINT ${quoteIdent(fk.constraintName)} ` +
+    `FOREIGN KEY (${quoteIdent(fk.columnName)}) REFERENCES ${quoteIdent(fk.refTable)}(${quoteIdent(fk.refColumn)}) ON DELETE ${fk.onDelete};`;
+}
+
+/**
+ * ALTER TABLE ... DROP CONSTRAINT IF EXISTS.
+ * @param {string} tableName
+ * @param {string} constraintName
+ * @return {string}
+ */
+export function buildDropConstraintSql(tableName: string, constraintName: string): string {
+  return `ALTER TABLE ${quoteIdent(tableName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(constraintName)};`;
+}
+
 /**
  * Fragmento de definición de una columna: "col" tipo [NOT NULL] [DEFAULT ...]. Reutilizado por el
  * CREATE TABLE. Solo emite DEFAULT cuando está declarado en el modelo (`defaultValue` o `defaultSql`);
@@ -562,7 +680,8 @@ export function buildColumnDefSql(col: IHuemulColumnDef): string {
 }
 
 /**
- * CREATE TABLE completo desde el modelo (columnas + PK + FK ON DELETE CASCADE). Usado cuando la tabla no existe.
+ * CREATE TABLE completo desde el modelo (columnas + PK + FK con la accion de `fkOnDelete`, CASCADE por
+ * defecto). Usado cuando la tabla no existe.
  * @param {IHuemulColumnDef[]} columnsInfo
  * @param {string} tableName
  * @return {string}
@@ -574,7 +693,7 @@ export function buildCreateTableSql(columnsInfo: IHuemulColumnDef[], tableName: 
   if (pkCols.length > 0) lines.push(`PRIMARY KEY (${pkCols.join(", ")})`);
 
   for (const c of columnsInfo.filter((e) => (e.PKModuleName ?? "").length > 0)) {
-    lines.push(`FOREIGN KEY (${quoteIdent(c.columnName)}) REFERENCES ${quoteIdent(c.PKModuleName ?? "")}(${quoteIdent(c.PKModuleNameId ?? "")}) ON DELETE CASCADE`);
+    lines.push(`FOREIGN KEY (${quoteIdent(c.columnName)}) REFERENCES ${quoteIdent(c.PKModuleName ?? "")}(${quoteIdent(c.PKModuleNameId ?? "")}) ON DELETE ${fkOnDeleteAction(c)}`);
   }
 
   return `CREATE TABLE ${quoteIdent(tableName)} (\n${lines.join(",\n")}\n);`;
@@ -672,8 +791,9 @@ export async function syncTableSchema(run: SqlRunner, columnsInfo: IHuemulColumn
   const applyChanges = opts?.applyChanges ?? false;
   const applyTypeChanges = opts?.applyTypeChanges ?? true;
   const applyNarrowingChanges = opts?.applyNarrowingChanges ?? false;
+  const applyForeignKeys = opts?.applyForeignKeys ?? false;
 
-  const result: ITableSyncResult = {tableName, tableMissing: false, added: [], typeChanged: [], narrowing: [], extra: [], errors: [], sql: []};
+  const result: ITableSyncResult = {tableName, tableMissing: false, added: [], typeChanged: [], narrowing: [], extra: [], foreignKeys: [], errors: [], sql: []};
 
   // el tableName se valida antes de la introspección, que es la primera sentencia que lo interpola
   const tableError = validateIdentifier(tableName, "tableName");
@@ -775,7 +895,71 @@ export async function syncTableSchema(run: SqlRunner, columnsInfo: IHuemulColumn
     }
   }
 
+  if (applyForeignKeys) {
+    await reconcileForeignKeys(run, columnsInfo, tableName, result, applyChanges);
+  }
+
   return result;
+}
+
+/**
+ * Crea las FK declaradas que falten y recrea las que existan con otra accion de borrado.
+ *
+ * Es lo que cierra el hueco de `buildAddColumnSql`: una columna agregada a una tabla que ya existia
+ * nunca recibia su FK, y habia que escribir el ALTER a mano en cada consumidor.
+ *
+ * Solo toca las FK que el modelo declara. Las que existen en la base y no estan en el modelo se
+ * dejan como estan: pueden venir de otro sistema o de una decision deliberada.
+ *
+ * @param {SqlRunner} run ejecutor
+ * @param {IHuemulColumnDef[]} columnsInfo modelo
+ * @param {string} tableName tabla
+ * @param {ITableSyncResult} result resultado a completar
+ * @param {boolean} applyChanges false = solo reporta el SQL
+ * @return {Promise<void>}
+ */
+async function reconcileForeignKeys(run: SqlRunner, columnsInfo: IHuemulColumnDef[], tableName: string, result: ITableSyncResult, applyChanges: boolean): Promise<void> {
+  const declaradas = modelForeignKeys(columnsInfo, tableName);
+  if (declaradas.length === 0) return;
+
+  let actuales: {constraintName: string, columnName: string, deleteRule: string}[];
+  try {
+    const rows = await run(informationSchemaForeignKeysSql(tableName));
+    actuales = rows.map((r) => ({
+      constraintName: String(r["constraintName"] ?? ""),
+      columnName: String(r["columnName"] ?? ""),
+      deleteRule: String(r["deleteRule"] ?? "").toUpperCase(),
+    }));
+  } catch (error) {
+    result.errors.push(`introspect fk ${tableName}: ${String(error)}`);
+    return;
+  }
+
+  for (const fk of declaradas) {
+    // se busca por COLUMNA y no por nombre: una FK creada a mano pudo quedar con otro nombre, y
+    // crear una segunda sobre la misma columna no falla en PostgreSQL, solo duplica el chequeo
+    const actual = actuales.find((a) => a.columnName === fk.columnName);
+    if (actual !== undefined && actual.deleteRule === fk.onDelete) continue;
+
+    const sentencias: string[] = [];
+    if (actual !== undefined) {
+      sentencias.push(buildDropConstraintSql(tableName, actual.constraintName));
+    }
+    sentencias.push(buildAddForeignKeySql(tableName, fk));
+
+    for (const sql of sentencias) result.sql.push(sql);
+    if (!applyChanges) {
+      result.foreignKeys.push(`${fk.constraintName} (${fk.onDelete}) [would be ${actual === undefined ? "created" : "recreated"}]`);
+      continue;
+    }
+
+    try {
+      for (const sql of sentencias) await run(sql);
+      result.foreignKeys.push(`${fk.constraintName} (${fk.onDelete})${actual === undefined ? "" : ` [era ${actual.deleteRule}]`}`);
+    } catch (error) {
+      result.errors.push(`fk ${tableName}.${fk.columnName}: ${String(error)}`);
+    }
+  }
 }
 
 /**
