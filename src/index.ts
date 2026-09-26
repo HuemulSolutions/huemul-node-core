@@ -8,6 +8,7 @@ export * from "./config/huemul-env-check";
 // Funciones utilitarias
 export * from "./functions/huemul-functions";
 export * from "./functions/huemul-version";
+export * from "./functions/huemul-rut";
 
 // Filtros y clases de filtro
 export * from "./filters/huemul-filters";

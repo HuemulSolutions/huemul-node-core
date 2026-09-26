@@ -15,6 +15,7 @@ Core framework compartido entre todos los proyectos Node.js de HuemulSolutions. 
 | `errorMessages` | Mensajes de error i18n (es / en) |
 | `HuemulFilters` | Generación de cláusulas WHERE tipadas para SQL |
 | `huemul-functions` | Funciones utilitarias (hash, cifrado, fechas, base64, etc.) |
+| `huemul-rut` | RUT chileno: `rutNormalize`, `rutCheckDigit`, `rutIsValid`, `rutEquals` (única implementación para todos los proyectos) |
 | `dataTypeToPostgres` | Mapeo de tipos del framework a tipos PostgreSQL |
 | `huemul-swagger` | Generador OpenAPI 3.0 puro (schemas + paths CRUD + extras) desde `IHuemulColumnDef[]` |
 | `CloudProviderType`, `DatabaseType`, etc. | Enums del framework |
@@ -242,6 +243,21 @@ filters.age.addFilter(18, HuemulFilterOperators.GREATER_THAN_OR_EQUAL);
 
 const sql = filters.getWhereClause();
 // where (UPPER("base"."name") LIKE '%JOHN%') AND ("base"."age" >= 18)
+```
+
+---
+
+### 5.b RUT chileno
+
+Una sola implementación para todos los proyectos (antes había una en `huemul-node-read-docs`, otra en `huemul-node-sii` y otra en `gestion-costo-backend`).
+
+```ts
+import { rutNormalize, rutIsValid, rutEquals, rutCheckDigit } from "@huemulsolutions/huemul-node-core";
+
+rutNormalize("76.123.456-k");            // "76123456-K"  (no valida el verificador)
+rutIsValid("77.115.769-6");              // true          (normaliza y valida módulo 11)
+rutEquals("76.123.456-k", "76123456K");  // true          (un RUT vacío no es igual a nada)
+rutCheckDigit("77915170");               // "0"
 ```
 
 ---
