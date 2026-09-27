@@ -131,6 +131,32 @@ export enum errorType {
 
 }
 
+/**
+ * Codigo HTTP de cada tipo de error. Los errores de los datos o del permiso de quien llama son 4xx:
+ * antes solo dbRecordNotFound (404) y dbDataValidation (400) lo eran, y una validacion de la capa de
+ * logica (appDataValidation), un "sin permiso" o un duplicado llegaban al cliente como 500, igual que
+ * una caida del servidor. Lo que no esta aca es 500.
+ */
+export const HTTP_STATUS_BY_ERROR: Readonly<Partial<Record<errorType, number>>> = {
+  [errorType.dbRecordNotFound]: 404,
+  [errorType.dbDataValidation]: 400,
+  [errorType.appDataValidation]: 400,
+  [errorType.appCantDelete]: 400,
+  [errorType.appUnauthorized]: 401,
+  [errorType.appForbidden]: 403,
+  [errorType.dbDuplicated]: 409,
+  [errorType.dbDataVersionError]: 409,
+};
+
+/**
+ * Codigo HTTP de un error (HTTP_STATUS_BY_ERROR); 500 si no esta declarado.
+ * @param {number | string} errorId tipo de error
+ * @return {number}
+ */
+export function httpStatusOfError(errorId: number | string): number {
+  return HTTP_STATUS_BY_ERROR[Number(errorId) as errorType] ?? 500;
+}
+
 /*
 export enum operationType {
   write = "write",
@@ -565,15 +591,7 @@ export class HuemulLog<T> implements IHuemulLog {
    * @return {number}
    */
   getHttpStatusCodeError(): number {
-    let httpErrorCode = 500;
-
-    if (this.whatIDid.error.errorId === errorType.dbRecordNotFound) {
-      httpErrorCode = 404;
-    } else if (this.whatIDid.error.errorId === errorType.dbDataValidation) {
-      httpErrorCode = 400;
-    }
-
-    return httpErrorCode;
+    return httpStatusOfError(this.whatIDid.error.errorId);
   }
 
   /**
