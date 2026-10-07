@@ -118,6 +118,13 @@ describe('errorMessages — methods with parameters', () => {
       .toContain('age')
   })
 
+  it('errorNotString and errorNotArray interpolate fieldName and value (es/en)', () => {
+    expect(errorMessages.errorNotString('es', 'nombre', 5)).toBe('El campo nombre con valor "5" no es un texto')
+    expect(errorMessages.errorNotString('en', 'name', 5)).toBe('Field name with value "5" is not a string')
+    expect(errorMessages.errorNotArray('es', 'lista', 5)).toBe('El campo lista con valor "5" no es una lista')
+    expect(errorMessages.errorNotArray('en', 'list', 5)).toBe('Field list with value "5" is not a list')
+  })
+
   it('errorMustBeGreaterThan interpolates fieldName, value, and minValue', () => {
     const es = errorMessages.errorMustBeGreaterThan('es', 'cantidad', 0, 1)
     expect(es).toContain('cantidad')

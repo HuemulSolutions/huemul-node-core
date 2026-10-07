@@ -812,7 +812,10 @@ export class HuemulLog<T> implements IHuemulLog {
     this.whatIDid.endDate = new Date();
     this.whatIDid.elapsedTimeMS = (new Date()).getTime() - this.whatIDid.startDate.getTime();
     this.whatIDid.result = resultType.error;
-    if (errorId === errorType.dbDataValidation || errorId === errorType.dbOther) {
+    // dbOther puede traer el error crudo de la BD (SQL, nombres de tablas): al cliente va un texto
+    // genérico y el detalle queda en extraInfo. dbDataValidation es una validación de datos y su
+    // texto le dice al cliente qué campo corregir, así que se devuelve tal cual
+    if (errorId === errorType.dbOther) {
       this.whatIDid.error = {errorId: errorId, errorTxt: errorMessages.errorAnErrorOccurredIdDatabase(this.whoIAm.humanLanguage, this.whoIAm.transactionId)};
       this.whatIDid.extraInfo = {errorTxt: this.getTextFromExternalError(errorTxt), ...this.whatIDid.extraInfo};
     } else {

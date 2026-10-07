@@ -30,3 +30,24 @@ describe("httpStatusOfError", () => {
     expect(log.getHttpStatusCodeError()).toBe(400);
   });
 });
+
+/**
+ * Texto que ve el cliente: una validación tiene que decir qué campo corregir; un error de la BD no
+ * puede filtrar SQL ni nombres internos.
+ */
+describe("finishErrorForDataLayer: texto para el cliente", () => {
+  it("dbDataValidation devuelve el mensaje de validación tal cual", () => {
+    const log = new HuemulLog<unknown>(layerType.logic, "test", "c", "test", "1.0");
+    log.finishErrorForDataLayer(errorType.dbDataValidation, "Field roleId with value \"undefined\" not found or is empty");
+    expect(log.getErrorTxt()).toBe("Field roleId with value \"undefined\" not found or is empty");
+    expect(log.getHttpStatusCodeError()).toBe(400);
+  });
+
+  it("dbOther oculta el error crudo y lo deja en extraInfo", () => {
+    const log = new HuemulLog<unknown>(layerType.data, "test", "c", "test", "1.0");
+    log.finishErrorForDataLayer(errorType.dbOther, "relation \"secretTable\" does not exist");
+    expect(log.getErrorTxt()).not.toContain("secretTable");
+    expect(JSON.stringify(log.whatIDid.extraInfo)).toContain("secretTable");
+    expect(log.getHttpStatusCodeError()).toBe(500);
+  });
+});

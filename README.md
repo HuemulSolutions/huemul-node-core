@@ -168,7 +168,8 @@ return log.finishErrorForDataLayer(errorType.dbRecordNotFound, "Usuario no encon
   no aporta y entierra lo que sí importa—;
 - ante un error se imprimen `stepName`, `errorTxt`, `orgId`, `url`… y sobre todo **`extraInfo`**, que
   es donde el framework deja el mensaje crudo cuando al cliente se le responde uno genérico
-  (`finishErrorForDataLayer` con `dbOther` / `dbDataValidation`).
+  (`finishErrorForDataLayer` con `dbOther`). Desde 2.7.0, `dbDataValidation` ya no se reemplaza: el
+  cliente recibe el mensaje de validación (qué campo falta o está mal) con HTTP 400.
 
 Ese último punto es el que hace diagnosticable un error: cuando devuelvas un genérico al cliente
 (401/403/426), deja la causa concreta en `whatIDid.extraInfo` y el logger la imprime.
