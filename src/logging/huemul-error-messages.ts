@@ -103,6 +103,22 @@ export class errorMessages {
     return `Field ${fieldName} with value "${value}" is not a number`;
   }
 
+  static errorNotString(humanLanguage: string, fieldName: string, value: unknown) {
+    if (humanLanguage === 'es') {
+      return `El campo ${fieldName} con valor "${value}" no es un texto`;
+    }
+
+    return `Field ${fieldName} with value "${value}" is not a string`;
+  }
+
+  static errorNotArray(humanLanguage: string, fieldName: string, value: unknown) {
+    if (humanLanguage === 'es') {
+      return `El campo ${fieldName} con valor "${value}" no es una lista`;
+    }
+
+    return `Field ${fieldName} with value "${value}" is not a list`;
+  }
+
   static errorMustBeGreaterThan(humanLanguage: string, fieldName: string, value: unknown, minValue: number) {
     if (humanLanguage === 'es') {
       return `El campo ${fieldName} con valor "${value}" debe ser mayor a ${minValue}`;
