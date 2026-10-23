@@ -8,6 +8,7 @@ import {
   buildAddColumnSql,
   buildAlterColumnTypeSql,
   buildCreateTableSql,
+  buildSetDefaultSql,
   toSchemaColumn,
   syncTableSchema,
   informationSchemaColumnsSql,
@@ -136,11 +137,15 @@ describe('isNarrowingChange', () => {
 describe('toSchemaColumn', () => {
   it('maps camelCase alias rows and YES/NO nullable', () => {
     const sc = toSchemaColumn({ columnName: 'a', dataType: 'character varying', characterMaximumLength: 50, numericPrecision: null, numericScale: null, isNullable: 'NO' })
-    expect(sc).toEqual({ columnName: 'a', dataType: 'character varying', characterMaximumLength: 50, numericPrecision: null, numericScale: null, isNullable: false })
+    expect(sc).toEqual({ columnName: 'a', dataType: 'character varying', characterMaximumLength: 50, numericPrecision: null, numericScale: null, isNullable: false, columnDefault: null })
   })
   it('maps snake_case rows and numeric strings', () => {
     const sc = toSchemaColumn({ column_name: 'b', data_type: 'numeric', character_maximum_length: null, numeric_precision: '19', numeric_scale: '4', is_nullable: 'YES' })
-    expect(sc).toEqual({ columnName: 'b', dataType: 'numeric', characterMaximumLength: null, numericPrecision: 19, numericScale: 4, isNullable: true })
+    expect(sc).toEqual({ columnName: 'b', dataType: 'numeric', characterMaximumLength: null, numericPrecision: 19, numericScale: 4, isNullable: true, columnDefault: null })
+  })
+  it('keeps the current column default as text', () => {
+    expect(toSchemaColumn({ columnName: 'c', dataType: 'boolean', isNullable: 'NO', columnDefault: 'false' }).columnDefault).toBe('false')
+    expect(toSchemaColumn({ column_name: 'd', data_type: 'character varying', is_nullable: 'NO', column_default: "'PENDING'::character varying" }).columnDefault).toBe("'PENDING'::character varying")
   })
 })
 
@@ -234,14 +239,35 @@ describe('SQL builders', () => {
     expect(buildAlterColumnTypeSql('subscription', col({ columnName: 'subsName', columnType: 'string', columnLength: 120 })))
       .toBe('ALTER TABLE "subscription" ALTER COLUMN "subsName" TYPE varchar(120) USING "subsName"::varchar(120)')
   })
-  it('buildCreateTableSql includes columns, PK and FK; DEFAULT only when declared', () => {
+  it('buildCreateTableSql: a NOT NULL non-PK column without declared default gets the type fallback, like ADD COLUMN', () => {
+    const sql = buildCreateTableSql([
+      col({ columnName: 'id', columnType: 'string', columnLength: 50, pkType: 'manualPK', allowNull: false }),
+      col({ columnName: 'flag', columnType: 'boolean', allowNull: false }),
+      col({ columnName: 'qty', columnType: 'number', allowNull: false }),
+      col({ columnName: 'name', columnType: 'string', columnLength: 30, allowNull: false }),
+      col({ columnName: 'note', columnType: 'string', columnLength: 30, allowNull: true }),
+    ], 't')
+    expect(sql).toContain('"flag" boolean NOT NULL DEFAULT false')
+    expect(sql).toContain('"qty" INT NOT NULL DEFAULT 0')
+    expect(sql).toContain('"name" varchar(30) NOT NULL DEFAULT \'\'')
+    // la PK y las nullable sin default declarado no reciben DEFAULT
+    expect(sql).not.toContain('"id" varchar(50) NOT NULL DEFAULT')
+    expect(sql).toContain('"note" varchar(30),')
+  })
+  it('buildSetDefaultSql: SET DEFAULT with the model default', () => {
+    expect(buildSetDefaultSql('t', col({ columnName: 'st', columnType: 'string', columnLength: 20, allowNull: false, defaultValue: 'PENDING' })))
+      .toBe('ALTER TABLE "t" ALTER COLUMN "st" SET DEFAULT \'PENDING\'')
+    expect(buildSetDefaultSql('t', col({ columnName: 'j', columnType: 'jsonb', allowNull: false, defaultValue: '[]' })))
+      .toBe('ALTER TABLE "t" ALTER COLUMN "j" SET DEFAULT \'[]\'::jsonb')
+  })
+  it('buildCreateTableSql includes columns, PK and FK; the PK gets no DEFAULT', () => {
     const sql = buildCreateTableSql([
       col({ columnName: 'subsId', columnType: 'string', columnLength: 50, pkType: 'manualPK', allowNull: false }),
       col({ columnName: 'subsStatus', columnType: 'string', columnLength: 20, allowNull: false, defaultValue: 'pending' }),
       col({ columnName: 'custId', columnType: 'string', columnLength: 50, PKModuleName: 'customer', PKModuleNameId: 'custId' }),
     ], 'subscription')
     expect(sql).toContain('CREATE TABLE "subscription"')
-    // NOT NULL sin default declarado NO fuerza DEFAULT en CREATE
+    // la PK NOT NULL sin default declarado no recibe DEFAULT en CREATE
     expect(sql).toContain('"subsId" varchar(50) NOT NULL')
     expect(sql).not.toContain('"subsId" varchar(50) NOT NULL DEFAULT')
     // NOT NULL con default declarado SÍ lo emite
@@ -300,6 +326,67 @@ describe('validateColumnDefault', () => {
     expect(errors).toHaveLength(2)
     expect(errors[0]).toContain('bad1')
     expect(errors[1]).toContain('bad2')
+  })
+})
+
+describe('defaults of existing columns', () => {
+  const model: IHuemulColumnDef[] = [
+    col({ columnName: 'id', columnType: 'string', columnLength: 50, pkType: 'manualPK', allowNull: false }),
+    col({ columnName: 'status', columnType: 'string', columnLength: 20, allowNull: false, defaultValue: 'PENDING' }),
+    col({ columnName: 'sign', columnType: 'number', allowNull: false, defaultValue: 1 }),
+    col({ columnName: 'taxes', columnType: 'jsonb', allowNull: false, defaultValue: '[]' }),
+    col({ columnName: 'plain', columnType: 'boolean', allowNull: false }),
+  ]
+  const rows = [
+    { columnName: 'id', dataType: 'character varying', characterMaximumLength: 50, isNullable: 'NO', columnDefault: null },
+    { columnName: 'status', dataType: 'character varying', characterMaximumLength: 20, isNullable: 'NO', columnDefault: null },
+    // ya tiene un default (distinto del modelo): no se toca
+    { columnName: 'sign', dataType: 'integer', isNullable: 'NO', columnDefault: '0' },
+    { columnName: 'taxes', dataType: 'jsonb', isNullable: 'NO', columnDefault: null },
+    // sin default declarado en el modelo: no se toca
+    { columnName: 'plain', dataType: 'boolean', isNullable: 'NO', columnDefault: null },
+  ]
+  const runner = (executed: string[]): SqlRunner => async (sql) => {
+    executed.push(sql)
+    return sql.includes('information_schema') ? rows : []
+  }
+
+  it('diffTableColumns lists only the columns without default that declare one', () => {
+    const diff = diffTableColumns(model, rows.map((r) => toSchemaColumn(r)), 't')
+    expect(diff.toSetDefault.map((c) => c.columnName)).toEqual(['status', 'taxes'])
+  })
+
+  it('apply mode: runs SET DEFAULT and reports it in defaultsSet', async () => {
+    const executed: string[] = []
+    const result = await syncTableSchema(runner(executed), model, 't', { applyChanges: true })
+    expect(result.defaultsSet).toEqual(['status', 'taxes'])
+    expect(executed).toContain('ALTER TABLE "t" ALTER COLUMN "status" SET DEFAULT \'PENDING\'')
+    expect(executed).toContain('ALTER TABLE "t" ALTER COLUMN "taxes" SET DEFAULT \'[]\'::jsonb')
+    expect(result.errors).toHaveLength(0)
+  })
+
+  it('evaluate mode: reports the SQL without executing it', async () => {
+    const executed: string[] = []
+    const result = await syncTableSchema(runner(executed), model, 't', { applyChanges: false })
+    expect(result.defaultsSet).toEqual(['status', 'taxes'])
+    expect(result.sql).toContain('ALTER TABLE "t" ALTER COLUMN "status" SET DEFAULT \'PENDING\'')
+    expect(executed.some((s) => s.includes('SET DEFAULT'))).toBe(false)
+  })
+
+  it('applyDefaults=false: does not look at defaults', async () => {
+    const executed: string[] = []
+    const result = await syncTableSchema(runner(executed), model, 't', { applyChanges: true, applyDefaults: false })
+    expect(result.defaultsSet).toHaveLength(0)
+    expect(executed.some((s) => s.includes('SET DEFAULT'))).toBe(false)
+  })
+
+  it('an invalid declared default is an error and is not applied', async () => {
+    const executed: string[] = []
+    const malo = [col({ columnName: 'taxes', columnType: 'jsonb', allowNull: false, defaultValue: 'no-json' })]
+    const result = await syncTableSchema(runner(executed), malo, 't', { applyChanges: true })
+    expect(result.defaultsSet).toHaveLength(0)
+    expect(result.errors.some((e) => e.startsWith('default t.taxes'))).toBe(true)
+    expect(executed.some((s) => s.includes('SET DEFAULT'))).toBe(false)
   })
 })
 

@@ -1,4 +1,5 @@
 /* eslint max-len: ["error", { "code": 400 }] */
+//version 1.1.0 2026-10-23 SRODRIGUEZ - defaults: el diff pone el default declarado a las columnas que existen sin default (SET DEFAULT) y el CREATE da a las NOT NULL el mismo default que el ADD COLUMN
 //version 1.0.3 2026-08-16 SRODRIGUEZ - bucket narrowing: los cambios que reducen capacidad no se aplican sin applyNarrowingChanges
 //version 1.0.2 2026-08-03 SRODRIGUEZ - escape de identificadores y literales + validación de identificadores y tipos
 //version 1.0.1 2026-08-03 SRODRIGUEZ - defaults por expresión SQL + validación de defaults
@@ -16,6 +17,8 @@ export interface ISchemaColumn {
   numericPrecision: number | null,
   numericScale: number | null,
   isNullable: boolean,
+  /** default actual de la columna (information_schema.column_default); null si no tiene */
+  columnDefault?: string | null,
 }
 
 /**
@@ -51,6 +54,8 @@ export interface ITableSchemaDiff {
   tableMissing: boolean,
   toAdd: IHuemulColumnDef[],
   toAlter: IColumnDiff[],
+  /** columnas que existen sin default y el modelo declara uno (defaultValue o defaultSql) */
+  toSetDefault: IHuemulColumnDef[],
   extra: string[],
 }
 
@@ -70,6 +75,8 @@ export interface ITableSyncResult {
    * con los cambios de tipo aplicables ni parezcan trabajo realizado.
    */
   narrowing: string[],
+  /** columnas a las que se les puso el default declarado en el modelo (SET DEFAULT). Vacio si applyDefaults es false. */
+  defaultsSet: string[],
   extra: string[],
   /** FK creadas o recreadas en esta corrida. Vacio si applyForeignKeys no esta activo. */
   foreignKeys: string[],
@@ -106,6 +113,13 @@ export interface ISchemaSyncOptions {
    * puede tener filas huerfanas que nadie ha mirado en anios.
    */
   applyForeignKeys?: boolean,
+  /**
+   * true (default): a una columna que existe sin default se le pone el que declara el modelo
+   * (`ALTER COLUMN ... SET DEFAULT`). No toca las filas ni la nulabilidad: solo lo que la base pone
+   * cuando un INSERT omite la columna. Una columna que ya tiene un default (aunque distinto) no se toca.
+   * false: no se revisan los defaults.
+   */
+  applyDefaults?: boolean,
 }
 
 /**
@@ -303,7 +317,7 @@ export function isNarrowingChange(expected: ICanonicalType, actual: ICanonicalTy
 export function informationSchemaColumnsSql(tableName: string): string {
   return `SELECT column_name AS "columnName", data_type AS "dataType", ` +
     `character_maximum_length AS "characterMaximumLength", numeric_precision AS "numericPrecision", ` +
-    `numeric_scale AS "numericScale", is_nullable AS "isNullable" ` +
+    `numeric_scale AS "numericScale", is_nullable AS "isNullable", column_default AS "columnDefault" ` +
     `FROM information_schema.columns ` +
     `WHERE table_name = '${escapeSqlLiteral(tableName)}' AND table_schema = 'public'`;
 }
@@ -327,6 +341,7 @@ function numOrNull(v: unknown): number | null {
 export function toSchemaColumn(row: Record<string, unknown>): ISchemaColumn {
   const get = (a: string, b: string): unknown => (row[a] !== undefined ? row[a] : row[b]);
   const nullable = get("isNullable", "is_nullable");
+  const columnDefault = get("columnDefault", "column_default");
   return {
     columnName: String(get("columnName", "column_name") ?? ""),
     dataType: String(get("dataType", "data_type") ?? ""),
@@ -334,6 +349,7 @@ export function toSchemaColumn(row: Record<string, unknown>): ISchemaColumn {
     numericPrecision: numOrNull(get("numericPrecision", "numeric_precision")),
     numericScale: numOrNull(get("numericScale", "numeric_scale")),
     isNullable: typeof nullable === "boolean" ? nullable : String(nullable).toUpperCase() === "YES",
+    columnDefault: columnDefault == null ? null : String(columnDefault),
   };
 }
 
@@ -675,7 +691,10 @@ export function buildDropConstraintSql(tableName: string, constraintName: string
  */
 export function buildColumnDefSql(col: IHuemulColumnDef): string {
   const notNull = col.allowNull ? "" : " NOT NULL";
-  const def = hasModelDefault(col) ? ` DEFAULT ${sqlDefaultLiteral(col)}` : "";
+  // una NOT NULL (que no sea PK) nace con default, igual que en buildAddColumnSql: asi una base creada de
+  // cero queda igual que una que recibio la columna despues, y un INSERT que la omite no falla
+  const conDefault = hasModelDefault(col) || (!col.allowNull && !isPk(col.pkType));
+  const def = conDefault ? ` DEFAULT ${sqlDefaultLiteral(col)}` : "";
   return `${quoteIdent(col.columnName)} ${columnPostgresType(col)}${notNull}${def}`;
 }
 
@@ -721,6 +740,16 @@ export function buildAddColumnSql(tableName: string, col: IHuemulColumnDef): str
 }
 
 /**
+ * ALTER TABLE ... ALTER COLUMN ... SET DEFAULT con el default declarado en el modelo.
+ * @param {string} tableName
+ * @param {IHuemulColumnDef} col
+ * @return {string}
+ */
+export function buildSetDefaultSql(tableName: string, col: IHuemulColumnDef): string {
+  return `ALTER TABLE ${quoteIdent(tableName)} ALTER COLUMN ${quoteIdent(col.columnName)} SET DEFAULT ${sqlDefaultLiteral(col)}`;
+}
+
+/**
  * ALTER TABLE ... ALTER COLUMN ... TYPE ... USING cast.
  * @param {string} tableName
  * @param {IHuemulColumnDef} col
@@ -742,7 +771,7 @@ export function buildAlterColumnTypeSql(tableName: string, col: IHuemulColumnDef
 export function diffTableColumns(columnsInfo: IHuemulColumnDef[], actualRows: ISchemaColumn[], tableName: string): ITableSchemaDiff {
   const tableMissing = actualRows.length === 0;
   if (tableMissing) {
-    return {tableName, tableMissing: true, toAdd: [], toAlter: [], extra: []};
+    return {tableName, tableMissing: true, toAdd: [], toAlter: [], toSetDefault: [], extra: []};
   }
 
   const actualMap = new Map<string, ISchemaColumn>();
@@ -750,6 +779,7 @@ export function diffTableColumns(columnsInfo: IHuemulColumnDef[], actualRows: IS
 
   const toAdd: IHuemulColumnDef[] = [];
   const toAlter: IColumnDiff[] = [];
+  const toSetDefault: IHuemulColumnDef[] = [];
   const modelNames = new Set<string>();
 
   for (const col of columnsInfo) {
@@ -758,6 +788,9 @@ export function diffTableColumns(columnsInfo: IHuemulColumnDef[], actualRows: IS
     if (actual === undefined) {
       toAdd.push(col);
       continue;
+    }
+    if (hasModelDefault(col) && (actual.columnDefault ?? null) === null) {
+      toSetDefault.push(col);
     }
     const expected = canonicalFromColumnDef(col);
     const real = canonicalFromInformationSchema(actual);
@@ -775,7 +808,7 @@ export function diffTableColumns(columnsInfo: IHuemulColumnDef[], actualRows: IS
 
   const extra = actualRows.filter((r) => !modelNames.has(r.columnName)).map((r) => r.columnName);
 
-  return {tableName, tableMissing: false, toAdd, toAlter, extra};
+  return {tableName, tableMissing: false, toAdd, toAlter, toSetDefault, extra};
 }
 
 /**
@@ -792,8 +825,9 @@ export async function syncTableSchema(run: SqlRunner, columnsInfo: IHuemulColumn
   const applyTypeChanges = opts?.applyTypeChanges ?? true;
   const applyNarrowingChanges = opts?.applyNarrowingChanges ?? false;
   const applyForeignKeys = opts?.applyForeignKeys ?? false;
+  const applyDefaults = opts?.applyDefaults ?? true;
 
-  const result: ITableSyncResult = {tableName, tableMissing: false, added: [], typeChanged: [], narrowing: [], extra: [], foreignKeys: [], errors: [], sql: []};
+  const result: ITableSyncResult = {tableName, tableMissing: false, added: [], typeChanged: [], narrowing: [], defaultsSet: [], extra: [], foreignKeys: [], errors: [], sql: []};
 
   // el tableName se valida antes de la introspección, que es la primera sentencia que lo interpola
   const tableError = validateIdentifier(tableName, "tableName");
@@ -892,6 +926,29 @@ export async function syncTableSchema(run: SqlRunner, columnsInfo: IHuemulColumn
       }
     } else {
       result.typeChanged.push(`${change.columnName} (${change.actualType} -> ${change.expectedType})`);
+    }
+  }
+
+  if (applyDefaults) {
+    for (const col of diff.toSetDefault) {
+      // el default se interpola en el DDL: se valida antes, igual que una columna nueva
+      const colErrors = [validateIdentifier(col.columnName, "columnName"), validateColumnDefault(col)].filter((e): e is string => e !== null);
+      if (colErrors.length > 0) {
+        for (const message of colErrors) result.errors.push(`default ${tableName}.${col.columnName}: ${message}`);
+        continue;
+      }
+      const sql = buildSetDefaultSql(tableName, col);
+      result.sql.push(sql);
+      if (applyChanges) {
+        try {
+          await run(sql);
+          result.defaultsSet.push(col.columnName);
+        } catch (error) {
+          result.errors.push(`default ${tableName}.${col.columnName}: ${String(error)}`);
+        }
+      } else {
+        result.defaultsSet.push(col.columnName);
+      }
     }
   }
 

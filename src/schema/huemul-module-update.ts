@@ -214,6 +214,7 @@ export async function updateModules(run: SqlRunner, modules: IHuemulModuleDef[],
     applyTypeChanges: opts?.applyTypeChanges,
     applyNarrowingChanges: opts?.applyNarrowingChanges,
     applyForeignKeys: opts?.applyForeignKeys,
+    applyDefaults: opts?.applyDefaults,
   };
 
   const result: IUpdateModulesResult = {modules: [], indexes: [], sql: [], errors: []};
