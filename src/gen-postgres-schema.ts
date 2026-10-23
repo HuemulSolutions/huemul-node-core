@@ -682,18 +682,33 @@ export function buildDropConstraintSql(tableName: string, constraintName: string
   return `ALTER TABLE ${quoteIdent(tableName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(constraintName)};`;
 }
 
+/** Tipos reales cuyo fallback de sqlDefaultLiteral ('' / 0 / false / '{}') es un valor valido. */
+const TIPOS_CON_FALLBACK = new Set(["character varying", "text", "integer", "numeric", "boolean", "jsonb"]);
+
+/**
+ * true si el fallback por tipo de sqlDefaultLiteral es valido para la columna. Una fecha u hora
+ * (timestamptz, time) no tiene fallback: '' no es un valor valido para esos tipos.
+ * @param {IHuemulColumnDef} col
+ * @return {boolean}
+ */
+function hasValidTypeFallback(col: IHuemulColumnDef): boolean {
+  return TIPOS_CON_FALLBACK.has(parsePostgresType(columnPostgresType(col)).base);
+}
+
 /**
  * Fragmento de definición de una columna: "col" tipo [NOT NULL] [DEFAULT ...]. Reutilizado por el
- * CREATE TABLE. Solo emite DEFAULT cuando está declarado en el modelo (`defaultValue` o `defaultSql`);
- * en un CREATE no hay filas, así que no se fuerzan defaults por tipo en columnas NOT NULL.
+ * CREATE TABLE. Emite el DEFAULT declarado en el modelo (`defaultValue` o `defaultSql`); una NOT NULL
+ * que no es PK y no declara default recibe el fallback por tipo (como en ADD COLUMN) si el tipo tiene
+ * uno valido: texto, numero, booleano o jsonb. Fechas y horas sin default declarado quedan sin DEFAULT.
  * @param {IHuemulColumnDef} col
  * @return {string}
  */
 export function buildColumnDefSql(col: IHuemulColumnDef): string {
   const notNull = col.allowNull ? "" : " NOT NULL";
   // una NOT NULL (que no sea PK) nace con default, igual que en buildAddColumnSql: asi una base creada de
-  // cero queda igual que una que recibio la columna despues, y un INSERT que la omite no falla
-  const conDefault = hasModelDefault(col) || (!col.allowNull && !isPk(col.pkType));
+  // cero queda igual que una que recibio la columna despues, y un INSERT que la omite no falla. Solo con
+  // fallback valido para el tipo: una fecha sin default declarado queda sin default, como antes
+  const conDefault = hasModelDefault(col) || (!col.allowNull && !isPk(col.pkType) && hasValidTypeFallback(col));
   const def = conDefault ? ` DEFAULT ${sqlDefaultLiteral(col)}` : "";
   return `${quoteIdent(col.columnName)} ${columnPostgresType(col)}${notNull}${def}`;
 }

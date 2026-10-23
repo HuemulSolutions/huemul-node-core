@@ -254,6 +254,21 @@ describe('SQL builders', () => {
     expect(sql).not.toContain('"id" varchar(50) NOT NULL DEFAULT')
     expect(sql).toContain('"note" varchar(30),')
   })
+  it('buildCreateTableSql: a NOT NULL date/time column without declared default gets no DEFAULT (\'\' is not a valid timestamp)', () => {
+    // el caso de cronJobLocks de huemul-node-scheduler, que rompio el CREATE en 2.8.0
+    const sql = buildCreateTableSql([
+      col({ columnName: 'cronJobCode', columnType: 'string', columnLength: 200, pkType: 'manualPK', allowNull: false }),
+      col({ columnName: 'lockedUntil', columnType: 'timestamptz', allowNull: false }),
+      col({ columnName: 'at', columnType: 'Time', allowNull: false }),
+      col({ columnName: 'holderId', columnType: 'string', columnLength: 200, allowNull: false }),
+      col({ columnName: 'createdAt', columnType: 'timestamptz', allowNull: false, defaultSql: 'now()' }),
+    ], 'cronJobLocks')
+    expect(sql).toContain('"lockedUntil" timestamptz NOT NULL,')
+    expect(sql).toContain('"at" time NOT NULL,')
+    expect(sql).toContain('"holderId" varchar(200) NOT NULL DEFAULT \'\'')
+    expect(sql).toContain('"createdAt" timestamptz NOT NULL DEFAULT now()')
+    expect(sql).not.toContain("timestamptz NOT NULL DEFAULT ''")
+  })
   it('buildSetDefaultSql: SET DEFAULT with the model default', () => {
     expect(buildSetDefaultSql('t', col({ columnName: 'st', columnType: 'string', columnLength: 20, allowNull: false, defaultValue: 'PENDING' })))
       .toBe('ALTER TABLE "t" ALTER COLUMN "st" SET DEFAULT \'PENDING\'')
